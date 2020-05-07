@@ -1,0 +1,12 @@
+name: ldap
+version: 1.0.0
+
+dependencies:
+  bindata:
+    github: spider-gazelle/bindata
+  promise:
+    github: spider-gazelle/promise
+
+development_dependencies:
+  ameba:
+    github: veelenga/ameba
