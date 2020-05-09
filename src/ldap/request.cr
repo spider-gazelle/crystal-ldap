@@ -1,6 +1,10 @@
 require "mutex"
 require "../ldap"
 
+class LDAP::Request; end
+
+require "./request/*"
+
 class LDAP::Request
   @msg_id = -1
   @id_mutex = Mutex.new
@@ -37,4 +41,85 @@ class LDAP::Request
       BER.new.set_string(password, 0, TagClass::ContextSpecific),
     }, Tag::BindRequest))
   end
+
+  alias SortControl = NamedTuple(name: String, rule: String, reverse: Bool)
+
+  PAGED_RESULTS = "1.2.840.113556.1.4.319" # Microsoft evil from RFC 2696
+  DELETE_TREE   = "1.2.840.113556.1.4.805"
+  SORT_REQUEST  = "1.2.840.113556.1.4.473"
+  SORT_RESPONSE = "1.2.840.113556.1.4.474"
+
+  def encode_sort_controls(*sort_controls : String | SortControl)
+    sort_controls = sort_controls.map do |control|
+      if control.is_a?(SortControl)
+        {
+          BER.new.set_string(control[:name], UniversalTags::OctetString),
+          BER.new.set_string(control[:rule], UniversalTags::OctetString),
+          BER.new.set_boolean(control[:reverse]),
+        }
+      else
+        {
+          BER.new.set_string(control, UniversalTags::OctetString),
+          BER.new.set_string("", UniversalTags::OctetString),
+          BER.new.set_boolean(false),
+        }
+      end
+    end
+
+    # TODO:: convert to actual message
+    {
+      BER.new.set_string(SORT_REQUEST, UniversalTags::OctetString),
+      BER.new.set_boolean(false),
+      sort_controls
+    }
+  end
+
+  # base:   https://tools.ietf.org/html/rfc4511#section-4.5.1.1
+  # filter: https://tools.ietf.org/html/rfc4511#section-4.5.1.7
+  # scope:  https://tools.ietf.org/html/rfc4511#section-4.5.1.2
+  # attrs:      https://tools.ietf.org/html/rfc4511#section-4.5.1.8
+  # attrs_only: https://tools.ietf.org/html/rfc4511#section-4.5.1.6
+  # referrals:  https://tools.ietf.org/html/rfc4511#section-4.5.3
+  # deref: https://tools.ietf.org/html/rfc4511#section-4.5.1.3
+  # size: https://tools.ietf.org/html/rfc4511#section-4.5.1.4
+  # time: https://tools.ietf.org/html/rfc4511#section-4.5.1.5
+  def search(
+    base : String,
+    filter : Filter = Filter.equal("objectClass", "*"),
+    scope : SearchScope = SearchScope::WholeSubtree,
+    attributes : Enumerable(String) | Enumerable(Symbol) = [] of String,
+    attributes_only : Bool = false,
+    return_referrals : Bool = true,
+    dereference : DereferenceAliases = DereferenceAliases::Always,
+    size : Int = 0,
+    time : Int = 0,
+    paged_searches_supported : Bool = false,
+    sort_control : BER? = nil
+  )
+    attributes = attributes.map { |a| BER.new.set_string(a.to_s, UniversalTags::OctetString) }
+
+    # TODO:: support string based filters
+    # TODO:: proper filters - this is a place holder (eq right == *)
+    filter = BER.new.set_string("objectClass", 7, TagClass::ContextSpecific)
+
+    # Eg, left == right
+    left = BER.new.set_string("objectClass", UniversalTags::OctetString)
+    right = BER.new.set_string("person", UniversalTags::OctetString)
+    filter = LDAP.context_sequence({left, right}, 3)
+
+
+    # TODO:: sort control
+
+    build(LDAP.app_sequence({
+      BER.new.set_string(base, UniversalTags::OctetString),
+      BER.new.set_integer(scope.to_u8, UniversalTags::Enumerated),
+      BER.new.set_integer(dereference.to_u8, UniversalTags::Enumerated),
+      BER.new.set_integer(size),
+      BER.new.set_integer(time),
+      BER.new.set_boolean(attributes_only),
+      filter,
+      LDAP.sequence(attributes)
+    }, Tag::SearchRequest))
+  end
+
 end

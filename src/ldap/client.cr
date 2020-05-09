@@ -4,9 +4,14 @@ require "promise"
 require "../ldap"
 
 class LDAP::Client
-  class TlsError < Exception; end
+  class TlsError < Error; end
+  class AuthError < Error; end
 
   def initialize(socket, tls_context : OpenSSL::SSL::Context::Client? = nil)
+    @results = Hash(Int32, Array(Response)).new do |h, k|
+      h[k] = [] of Response
+    end
+
     # Send without delay as we will be using `#flush`
     socket.tcp_nodelay = true if socket.responds_to?(:tcp_nodelay=)
 
@@ -45,16 +50,50 @@ class LDAP::Client
   end
 
   def authenticate(username : String = "", password : String = "")
-    write(*@request.authenticate(username, password))
+    result = write(*@request.authenticate(username, password)).get
+    if result.tag.bind_result?
+      details = result.parse_bind_response
+      result_code = details[:result_code]
+      raise AuthError.new("bind failed with #{result_code}: #{details[:error_message]}") unless result_code.success?
+    else
+      raise Error.new("unexpected response: #{result.tag}")
+    end
+    self
+  rescue e
+    close
+    raise e
   end
 
-  def parse_response(packet : BER)
-    response = Response.from_response packet
-    request = @mutex.synchronize { @requests.delete response.id }
-    if request
-      request.resolve(response)
+  def search(*args, **opts)
+    result = write(*@request.search(*args, **opts)).get
+    results = @results.delete(result.id) || [] of Response
+
+    if result.tag.search_result?
+      details = result.parse_result
+      result_code = details[:result_code]
+      raise AuthError.new("search failed with #{result_code}: #{details[:error_message]}") unless result_code.in?(Response::SEARCH_SUCCESS)
+
+      results.map(&.parse_search_data)
     else
-      Log.warn { "unexpected message received #{response.inspect}" }
+      raise Error.new("unexpected response: #{result.tag}")
+    end
+  end
+
+  protected def parse_response(packet : BER)
+    response = Response.from_response packet
+    # Search results are returned in multiple packets
+    case response.tag
+    when Tag::SearchResultReferral
+      # TODO::
+    when Tag::SearchReturnedData
+      @results[response.id] << response
+    else
+      request = @mutex.synchronize { @requests.delete response.id }
+      if request
+        request.resolve(response)
+      else
+        Log.warn { "unexpected message received #{response.inspect}" }
+      end
     end
   end
 
@@ -64,17 +103,14 @@ class LDAP::Client
       data = socket.read_bytes(ASN1::BER)
       parse_response data
     end
-    # Clean up pending responses
-
-
   rescue IO::Error
-    @mutex.synchronize { @socket.close }
+    @mutex.synchronize { close }
   rescue e
     Log.error(exception: e) { e.message }
     @mutex.synchronize do
       @requests.values.each(&.reject(e))
       @requests.clear
-      @socket.close
+      close
     end
   ensure
     @mutex.synchronize do

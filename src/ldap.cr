@@ -51,6 +51,19 @@ module LDAP
     IntermediateResponse = 25
   end
 
+  enum SearchScope
+    BaseObject = 0
+    SingleLevel = 1
+    WholeSubtree = 2
+  end
+
+  enum DereferenceAliases
+    Never = 0
+    Search = 1
+    Find = 2
+    Always = 3
+  end
+
   def self.sequence(
     data : Enumerable(ASN1::BER),
     tag_class : TagClass = TagClass::Universal,

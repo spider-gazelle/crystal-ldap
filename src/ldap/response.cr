@@ -95,6 +95,21 @@ class LDAP::Response
     }
   end
 
+  def parse_search_data
+    entry = @payload
+    raise Error.new("Invalid entry size in search results") unless entry.size >= 2
+    search_entry = entry[0].get_string
+    data = {
+      "dn" => [search_entry]
+    }
+    entry[1].children.each do |attribute|
+      key_value = attribute.children
+      raise Error.new("Invalid attribute size in search results") unless key_value.size >= 2
+      data[key_value[0].get_string] = key_value[1].children.map(&.get_string)
+    end
+    data
+  end
+
   def result_message(code : Int)
     Code.from_value(code).to_s.underscore.gsub('_', ' ')
   rescue e

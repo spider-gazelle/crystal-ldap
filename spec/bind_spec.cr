@@ -56,34 +56,4 @@ describe LDAP do
       error_message: "",
     })
   end
-
-  it "should use the client to bind to a host" do
-    # emulate a network connection
-    local = IO::Stapled.new(*IO.pipe, true)
-    remote = IO::Stapled.new(*IO.pipe, true)
-
-    socket = IO::Stapled.new(remote, local, true)
-    server = IO::Stapled.new(local, remote, true)
-
-    client = LDAP::Client.new(socket)
-    auth_promise = client.authenticate(user, pass)
-
-    # check the client sent the bind request
-    request = server.read_bytes(ASN1::BER)
-    request.to_slice.should eq(bind_request)
-    server.write(bind_success)
-
-    # check he client received the response
-    response = auth_promise.get
-    response.id.should eq(0)
-    response.tag.should eq(LDAP::Tag::BindResult)
-
-    response.parse_bind_response.should eq({
-      result_code:   LDAP::Response::Code::Success,
-      matched_dn:    "",
-      error_message: "",
-    })
-
-    client.close
-  end
 end
