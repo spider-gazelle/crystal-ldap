@@ -23,6 +23,10 @@ class LDAP::Request::Filter
     @filter
   end
 
+  def to_slice
+    to_ber.to_slice
+  end
+
   def self.equal(object : String, value)
     value = value.to_s
     if value == "*"
@@ -52,7 +56,7 @@ class LDAP::Request::Filter
   def self.not_equal(object : String, value)
     self.new(
       Type::NotEqual,
-      LDAP.context_sequence({self.class.equal(object, value).to_ber}, 2)
+      LDAP.context_sequence({equal(object, value).to_ber}, 2)
     )
   end
 
@@ -72,11 +76,11 @@ class LDAP::Request::Filter
     self.new(Type::And, LDAP.context_sequence({left.to_ber, right.to_ber}, 0))
   end
 
-  def intersect(left : BER, right : BER)
+  def self.intersect(left : BER, right : BER)
     self.new(Type::Or, LDAP.context_sequence({left, right}, 1))
   end
 
-  def intersect(left : Filter, right : Filter)
+  def self.intersect(left : Filter, right : Filter)
     self.new(Type::Or, LDAP.context_sequence({left.to_ber, right.to_ber}, 1))
   end
 

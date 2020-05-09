@@ -85,7 +85,7 @@ class LDAP::Request
   # time: https://tools.ietf.org/html/rfc4511#section-4.5.1.5
   def search(
     base : String,
-    filter : Filter = Filter.equal("objectClass", "*"),
+    filter : Filter | String = Filter.equal("objectClass", "*"),
     scope : SearchScope = SearchScope::WholeSubtree,
     attributes : Enumerable(String) | Enumerable(Symbol) = [] of String,
     attributes_only : Bool = false,
@@ -98,9 +98,10 @@ class LDAP::Request
   )
     attributes = attributes.map { |a| BER.new.set_string(a.to_s, UniversalTags::OctetString) }
 
-    # TODO:: support string based filters
+    # support string based filters
+    filter = FilterParser.parse(filter) if filter.is_a?(String)
 
-    # TODO:: sort control
+    # TODO:: sort controls
 
     build(LDAP.app_sequence({
       BER.new.set_string(base, UniversalTags::OctetString),

@@ -35,17 +35,15 @@ tls.verify_mode = OpenSSL::SSL::VerifyMode::NONE
 
 # Bind to the server
 client = LDAP::Client.new(socket, tls)
-result = client.authenticate(user, pass).get
-
-if result.tag.bind_result?
-  result_code = result.parse_bind_response[:result_code]
-  raise "bind failed with #{result_code}" unless result_code.success?
-else
-  client.close
-  raise "unexpected response #{result.tag}"
-end
+client.authenticate(user, pass)
 
 # Can now perform LDAP operations
+filter = LDAP::Request::Filter.equal("objectClass", "person")
+client.search(base: "dc=example,dc=com", filter: filter, size: 6, attributes: ["hasSubordinates", "objectClass"])
+
+# Note how filters can be combined and standard LDAP queries can be parsed
+filter = (filter & LDAP::Request::Filter.equal("sn", "training")) | LDAP::Request::FilterParser.parse("(uid=einstein)")
+client.search(base: "dc=example,dc=com", filter: filter)
 ```
 
 To use the non-standard `LDAPS` (LDAP Secure, commonly known as LDAP over SSL) protocol then pass in a `OpenSSL::SSL::Socket::Client` directly: `LDAP::Client.new(tls_socket)`
