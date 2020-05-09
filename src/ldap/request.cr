@@ -99,14 +99,6 @@ class LDAP::Request
     attributes = attributes.map { |a| BER.new.set_string(a.to_s, UniversalTags::OctetString) }
 
     # TODO:: support string based filters
-    # TODO:: proper filters - this is a place holder (eq right == *)
-    filter = BER.new.set_string("objectClass", 7, TagClass::ContextSpecific)
-
-    # Eg, left == right
-    left = BER.new.set_string("objectClass", UniversalTags::OctetString)
-    right = BER.new.set_string("person", UniversalTags::OctetString)
-    filter = LDAP.context_sequence({left, right}, 3)
-
 
     # TODO:: sort control
 
@@ -117,7 +109,7 @@ class LDAP::Request
       BER.new.set_integer(size),
       BER.new.set_integer(time),
       BER.new.set_boolean(attributes_only),
-      filter,
+      filter.to_ber,
       LDAP.sequence(attributes)
     }, Tag::SearchRequest))
   end

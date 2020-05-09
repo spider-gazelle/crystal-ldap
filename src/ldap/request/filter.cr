@@ -9,91 +9,89 @@ class LDAP::Request::Filter
     And
     Or
     Not
-    Extensible
 
-    # This is primarily used for Microsoft Active Directory to compare GUID values
-    BinaryComparison
+    # TODO:: Implement this
+    Extensible
   end
 
-  def initialize(@operation : Type, @left : String, @right : String)
+  def initialize(@operation : Type, @filter : BER)
+  end
+
+  getter operation : Type
+
+  def to_ber
+    @filter
   end
 
   def self.equal(object : String, value)
-    self.new(Type::Equal, object, value.to_s)
+    value = value.to_s
+    if value == "*"
+      self.new(Type::Equal, BER.new.set_string(object, 7, TagClass::ContextSpecific))
+    elsif value =~ /[*]/
+      # TODO
+      raise "not implemented"
+    else
+      left = BER.new.set_string(object, UniversalTags::OctetString)
+      right = BER.new.set_string(value, UniversalTags::OctetString)
+      self.new(Type::Equal, LDAP.context_sequence({left, right}, 3))
+    end
   end
 
+  def self.greater_than(object : String, value)
+    left = BER.new.set_string(object, UniversalTags::OctetString)
+    right = BER.new.set_string(value.to_s, UniversalTags::OctetString)
+    self.new(Type::GreaterThanOrEqual, LDAP.context_sequence({left, right}, 5))
+  end
 
-  def to_ber
-    case @operation
-    when Type::Equal
-      if @right == "*" # presence test
-        @left.to_s.to_ber_contextspecific(7)
-      elsif @right =~ /[*]/ # substring
-        # Parsing substrings is a little tricky. We use String#split to
-        # break a string into substrings delimited by the * (star)
-        # character. But we also need to know whether there is a star at the
-        # head and tail of the string, so we use a limit parameter value of
-        # -1: "If negative, there is no limit to the number of fields
-        # returned, and trailing null fields are not suppressed."
-        #
-        # 20100320 AZ: This is much simpler than the previous verison. Also,
-        # unnecessary regex escaping has been removed.
+  def self.less_than(object : String, value)
+    left = BER.new.set_string(object, UniversalTags::OctetString)
+    right = BER.new.set_string(value.to_s, UniversalTags::OctetString)
+    self.new(Type::LessThanOrEqual, LDAP.context_sequence({left, right}, 6))
+  end
 
-        ary = @right.split(/[*]+/, -1)
+  def self.not_equal(object : String, value)
+    self.new(
+      Type::NotEqual,
+      LDAP.context_sequence({self.class.equal(object, value).to_ber}, 2)
+    )
+  end
 
-        if ary.first.empty?
-          first = nil
-          ary.shift
-        else
-          first = unescape(ary.shift).to_ber_contextspecific(0)
-        end
+  def self.negate(filter : Filter)
+    self.new(Type::Not, LDAP.context_sequence({filter.to_ber}, 2))
+  end
 
-        if ary.last.empty?
-          last = nil
-          ary.pop
-        else
-          last = unescape(ary.pop).to_ber_contextspecific(2)
-        end
+  def self.negate(filter : BER)
+    self.new(Type::Not, LDAP.context_sequence({filter}, 2))
+  end
 
-        seq = ary.map { |e| unescape(e).to_ber_contextspecific(1) }
-        seq.unshift first if first
-        seq.push last if last
+  def self.join(left : BER, right : BER)
+    self.new(Type::And, LDAP.context_sequence({left, right}, 0))
+  end
 
-        [@left.to_s.to_ber, seq.to_ber].to_ber_contextspecific(4)
-      else # equality
-        [@left.to_s.to_ber, unescape(@right).to_ber].to_ber_contextspecific(3)
-      end
-    when Type::BinaryComparison
-      # make sure data is not forced to UTF-8
-      [@left.to_s.to_ber, unescape(@right).to_ber_bin].to_ber_contextspecific(3)
-    when Type::Extensible
-      seq = [] of BER
+  def self.join(left : Filter, right : Filter)
+    self.new(Type::And, LDAP.context_sequence({left.to_ber, right.to_ber}, 0))
+  end
 
-      unless @left =~ /^([-;\w]*)(:dn)?(:(\w+|[.\w]+))?$/
-        raise Net::LDAP::BadAttributeError, "Bad attribute #{@left}"
-      end
-      type, dn, rule = $1, $2, $4
+  def intersect(left : BER, right : BER)
+    self.new(Type::Or, LDAP.context_sequence({left, right}, 1))
+  end
 
-      seq << rule.to_ber_contextspecific(1) unless rule.to_s.empty? # matchingRule
-      seq << type.to_ber_contextspecific(2) unless type.to_s.empty? # type
-      seq << unescape(@right).to_ber_contextspecific(3) # matchingValue
-      seq << "1".to_ber_contextspecific(4) unless dn.to_s.empty? # dnAttributes
+  def intersect(left : Filter, right : Filter)
+    self.new(Type::Or, LDAP.context_sequence({left.to_ber, right.to_ber}, 1))
+  end
 
-      seq.to_ber_contextspecific(9)
-    when Type::GreaterThanOrEqual
-      [@left.to_s.to_ber, unescape(@right).to_ber].to_ber_contextspecific(5)
-    when Type::LessThanOrEqual
-      [@left.to_s.to_ber, unescape(@right).to_ber].to_ber_contextspecific(6)
-    when Type::NotEqual
-      [self.class.eq(@left, @right).to_ber].to_ber_contextspecific(2)
-    when Type::And
-      ary = [@left.coalesce(:and), @right.coalesce(:and)].flatten
-      ary.map(&:to_ber).to_ber_contextspecific(0)
-    when Type::Or
-      ary = [@left.coalesce(:or), @right.coalesce(:or)].flatten
-      ary.map(&:to_ber).to_ber_contextspecific(1)
-    when Type::Not
-      [@left.to_ber].to_ber_contextspecific(2)
-    end
+  # Joins two or more filters so that all conditions must be true.
+  def &(filter)
+    self.class.join(self, filter)
+  end
+
+  # Selects entries where either the left or right side are true.
+  def |(filter)
+    self.class.intersect(self, filter)
+  end
+
+  # Negates a filter.
+  def ~
+    self.class.negate(self)
   end
 end
