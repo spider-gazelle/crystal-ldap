@@ -52,15 +52,15 @@ module LDAP
   end
 
   enum SearchScope
-    BaseObject = 0
-    SingleLevel = 1
+    BaseObject   = 0
+    SingleLevel  = 1
     WholeSubtree = 2
   end
 
   enum DereferenceAliases
-    Never = 0
+    Never  = 0
     Search = 1
-    Find = 2
+    Find   = 2
     Always = 3
   end
 

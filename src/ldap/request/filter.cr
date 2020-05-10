@@ -32,8 +32,29 @@ class LDAP::Request::Filter
     if value == "*"
       self.new(Type::Equal, BER.new.set_string(object, 7, TagClass::ContextSpecific))
     elsif value =~ /[*]/
-      # TODO
-      raise "not implemented"
+      ary = value.split(/[*]+/)
+
+      if ary.first.empty?
+        first = nil
+        ary.shift
+      else
+        first = BER.new.set_string(ary.shift, 0, TagClass::ContextSpecific)
+      end
+
+      if ary.last.empty?
+        last = nil
+        ary.pop
+      else
+        last = BER.new.set_string(ary.pop, 2, TagClass::ContextSpecific)
+      end
+
+      seq = ary.map { |e| BER.new.set_string(e, 1, TagClass::ContextSpecific) }
+      seq.unshift first if first
+      seq.push last if last
+      seq = LDAP.sequence(seq)
+
+      left = BER.new.set_string(object, UniversalTags::OctetString)
+      self.new(Type::Equal, LDAP.context_sequence({left, seq}, 4))
     else
       left = BER.new.set_string(object, UniversalTags::OctetString)
       right = BER.new.set_string(value, UniversalTags::OctetString)

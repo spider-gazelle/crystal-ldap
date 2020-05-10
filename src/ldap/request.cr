@@ -70,7 +70,7 @@ class LDAP::Request
     {
       BER.new.set_string(SORT_REQUEST, UniversalTags::OctetString),
       BER.new.set_boolean(false),
-      sort_controls
+      sort_controls,
     }
   end
 
@@ -111,8 +111,7 @@ class LDAP::Request
       BER.new.set_integer(time),
       BER.new.set_boolean(attributes_only),
       filter.to_ber,
-      LDAP.sequence(attributes)
+      LDAP.sequence(attributes),
     }, Tag::SearchRequest))
   end
-
 end

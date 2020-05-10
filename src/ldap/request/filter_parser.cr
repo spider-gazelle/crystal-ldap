@@ -43,8 +43,8 @@ class LDAP::Request::FilterParser
             Filter.less_than(token, value)
           when ">="
             Filter.greater_than(token, value)
-          # when ":="
-          #  Filter.ex(token, value)
+            # when ":="
+            #  Filter.ex(token, value)
           else
             raise FilterSyntaxInvalidError.new("unsupported operation #{op}")
           end

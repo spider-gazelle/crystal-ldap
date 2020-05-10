@@ -5,6 +5,7 @@ require "../ldap"
 
 class LDAP::Client
   class TlsError < Error; end
+
   class AuthError < Error; end
 
   def initialize(socket, tls_context : OpenSSL::SSL::Context::Client? = nil)

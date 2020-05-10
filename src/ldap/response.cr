@@ -100,7 +100,7 @@ class LDAP::Response
     raise Error.new("Invalid entry size in search results") unless entry.size >= 2
     search_entry = entry[0].get_string
     data = {
-      "dn" => [search_entry]
+      "dn" => [search_entry],
     }
     entry[1].children.each do |attribute|
       key_value = attribute.children

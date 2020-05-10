@@ -1,6 +1,6 @@
 # LDAP Support for Crystal Lang
 
-[![Build Status](https://travis-ci.org/spider-gazelle/crystal-ldap.svg?branch=master)](https://travis-ci.org/spider-gazelle/crystal-ldap)
+[![Build Status](https://travis-ci.com/spider-gazelle/crystal-ldap.svg?branch=master)](https://travis-ci.com/github/spider-gazelle/crystal-ldap)
 
 ## Installation
 
