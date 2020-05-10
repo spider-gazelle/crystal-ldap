@@ -36,9 +36,9 @@ class LDAP::Request::FilterParser
           value = value.strip
           case op
           when "="
-            Filter.equal(token, value)
+            Filter.equal(token, value, escaped: true)
           when "!="
-            Filter.not_equal(token, value)
+            Filter.not_equal(token, value, escaped: true)
           when "<="
             Filter.less_than(token, value)
           when ">="
