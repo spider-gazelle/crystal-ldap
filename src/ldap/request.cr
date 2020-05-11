@@ -42,7 +42,7 @@ class LDAP::Request
     }, Tag::BindRequest))
   end
 
-  alias SortControl = NamedTuple(name: String, rule: String, reverse: Bool)
+  alias SortControl = NamedTuple(name: String, rule: String, reverse: Bool) | NamedTuple(name: String, reverse: Bool)
 
   PAGED_RESULTS = "1.2.840.113556.1.4.319" # Microsoft evil from RFC 2696
   DELETE_TREE   = "1.2.840.113556.1.4.805"
@@ -52,26 +52,31 @@ class LDAP::Request
   def encode_sort_controls(*sort_controls : String | SortControl)
     sort_controls = sort_controls.map do |control|
       if control.is_a?(SortControl)
-        {
+        LDAP.sequence({
           BER.new.set_string(control[:name], UniversalTags::OctetString),
-          BER.new.set_string(control[:rule], UniversalTags::OctetString),
+          BER.new.set_string(control[:rule]? || "", UniversalTags::OctetString),
           BER.new.set_boolean(control[:reverse]),
-        }
+        })
       else
-        {
+        LDAP.sequence({
           BER.new.set_string(control, UniversalTags::OctetString),
           BER.new.set_string("", UniversalTags::OctetString),
           BER.new.set_boolean(false),
-        }
+        })
       end
     end
 
-    # TODO:: convert to actual message
-    {
+    # Control sequence needs to be encoded as an OctetString
+    # https://tools.ietf.org/html/rfc2891
+    controls = BER.new.set_string("", UniversalTags::OctetString)
+    controls.payload = LDAP.sequence(sort_controls).to_slice
+
+    # convert to actual message
+    LDAP.sequence({
       BER.new.set_string(SORT_REQUEST, UniversalTags::OctetString),
       BER.new.set_boolean(false),
-      sort_controls,
-    }
+      controls,
+    })
   end
 
   # base:   https://tools.ietf.org/html/rfc4511#section-4.5.1.1
@@ -94,16 +99,15 @@ class LDAP::Request
     size : Int = 0,
     time : Int = 0,
     paged_searches_supported : Bool = false,
-    sort_control : BER? = nil
+    sort : String | SortControl | BER | Nil = nil
   )
     attributes = attributes.map { |a| BER.new.set_string(a.to_s, UniversalTags::OctetString) }
 
     # support string based filters
     filter = FilterParser.parse(filter) if filter.is_a?(String)
 
-    # TODO:: sort controls
-
-    build(LDAP.app_sequence({
+    # Build search request
+    search_request = LDAP.app_sequence({
       BER.new.set_string(base, UniversalTags::OctetString),
       BER.new.set_integer(scope.to_u8, UniversalTags::Enumerated),
       BER.new.set_integer(dereference.to_u8, UniversalTags::Enumerated),
@@ -112,6 +116,20 @@ class LDAP::Request
       BER.new.set_boolean(attributes_only),
       filter.to_ber,
       LDAP.sequence(attributes),
-    }, Tag::SearchRequest))
+    }, Tag::SearchRequest)
+
+    # Sort controls
+    if sort
+      sort_control = case sort
+                     when String | SortControl
+                       encode_sort_controls(sort)
+                     when BER
+                       sort
+                     end
+
+      build(search_request, sort_control)
+    else
+      build(search_request)
+    end
   end
 end

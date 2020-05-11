@@ -38,12 +38,61 @@ client = LDAP::Client.new(socket, tls)
 client.authenticate(user, pass)
 
 # Can now perform LDAP operations
-filter = LDAP::Request::Filter.equal("objectClass", "person")
-client.search(base: "dc=example,dc=com", filter: filter, size: 6, attributes: ["hasSubordinates", "objectClass"])
-
-# Note how filters can be combined and standard LDAP queries can be parsed
-filter = (filter & LDAP::Request::Filter.equal("sn", "training")) | LDAP::Request::FilterParser.parse("(uid=einstein)")
-client.search(base: "dc=example,dc=com", filter: filter)
 ```
 
 To use the non-standard `LDAPS` (LDAP Secure, commonly known as LDAP over SSL) protocol then pass in a `OpenSSL::SSL::Socket::Client` directly: `LDAP::Client.new(tls_socket)`
+
+### Querying
+
+You can perform search requests
+
+```crystal
+
+# You can use LDAP string filters directly
+client.search(base: "dc=example,dc=com", filter: "(|(uid=einstein)(uid=training))")
+
+# There are options to select particular attributes and limit response sizes
+filter = LDAP::Request::Filter.equal("objectClass", "person")
+client.search(
+  base: "dc=example,dc=com",
+  filter: filter,
+  size: 6,
+  attributes: ["hasSubordinates", "objectClass"]
+)
+
+# Filters can be combined using standard operations
+filter = (
+          LDAP::Request::Filter.equal("objectClass", "person") &
+          LDAP::Request::Filter.equal("sn", "training")) |
+          LDAP::Request::FilterParser.parse("(uid=einstein)"
+         )
+client.search(base: "dc=example,dc=com", filter: filter)
+
+```
+
+Search responses are `Array(Hash(String, Array(String)))`
+
+```crystal
+
+[
+ {
+  "dn" => ["uid=einstein,dc=example,dc=com"],
+  "objectClass" => ["inetOrgPerson", "organizationalPerson", "person", "top"],
+  "cn" => ["Albert Einstein"],
+  "sn" => ["Einstein"],
+  "uid" => ["einstein"],
+  "mail" => ["einstein@ldap.forumsys.com"],
+  "telephoneNumber" => ["314-159-2653"]
+ },
+ {
+  "dn" => ["uid=training,dc=example,dc=com"],
+  "uid" => ["training"],
+  "objectClass" => ["inetOrgPerson", "organizationalPerson", "person", "top"],
+  "cn" => ["FS Training"],
+  "sn" => ["training"],
+  "mail" => ["training@forumsys.com"],
+  "telephoneNumber" => ["888-111-2222"]
+ }
+]
+
+```
