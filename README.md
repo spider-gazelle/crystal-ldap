@@ -42,6 +42,21 @@ client.authenticate(user, pass)
 
 To use the non-standard `LDAPS` (LDAP Secure, commonly known as LDAP over SSL) protocol then pass in a `OpenSSL::SSL::Socket::Client` directly: `LDAP::Client.new(tls_socket)`
 
+```crystal
+# LDAPS method
+socket = TCPSocket.new(host, port)
+tls = OpenSSL::SSL::Context::Client.new
+tls.verify_mode = OpenSSL::SSL::VerifyMode::NONE
+socket = OpenSSL::SSL::Socket::Client.new(socket, context: tls, sync_close: true, hostname: host)
+
+# Bind to the server
+client = LDAP::Client.new(socket)
+client.authenticate(user, pass)
+
+# Can now perform LDAP operations
+```
+
+
 ### Querying
 
 You can perform search requests
