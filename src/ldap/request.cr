@@ -6,16 +6,15 @@ class LDAP::Request; end
 require "./request/*"
 
 class LDAP::Request
-  @msg_id = -1
+  @msg_id = 0
   @id_mutex = Mutex.new
 
+  # Message IDs run from 1 to Int32::MAX and wrap back to 1.
+  # RFC 4511 §4.1.1.1: "The message ID of zero is reserved for unsolicited
+  # notifications and MUST NOT be used in any other request."
   def next_message_id
     @id_mutex.synchronize {
-      begin
-        @msg_id = @msg_id + 1
-      rescue OverflowError
-        @msg_id = 0
-      end
+      @msg_id = @msg_id >= Int32::MAX ? 1 : @msg_id + 1
     }
   end
 
