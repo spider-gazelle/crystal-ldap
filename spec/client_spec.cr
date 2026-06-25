@@ -103,6 +103,26 @@ describe LDAP::Client do
       client.search(base: "dc=example,dc=com", filter: "(cn=nobody)").should eq([] of Hash(String, Array(String)))
     end
 
+    # End-to-end consequence of tolerant tag decoding: a response carrying an
+    # unmodelled protocol-op tag must not crash the read fiber — it resolves the
+    # request and surfaces as a clean per-call error to the caller.
+    it "surfaces an unexpected response tag as a clean error, not a read-fiber crash" do
+      unknown_tag = 30
+      socket = FakeSocket.new do |id|
+        op = LDAP.app_sequence({
+          LDAP::BER.new.set_integer(0, LDAP::UniversalTags::Enumerated),
+          LDAP::BER.new.set_string("", LDAP::UniversalTags::OctetString),
+          LDAP::BER.new.set_string("", LDAP::UniversalTags::OctetString),
+        }, unknown_tag)
+        LDAP.sequence({LDAP::BER.new.set_integer(id), op}).to_slice
+      end
+      client = LDAP::Client.new(socket)
+
+      expect_raises(LDAP::Error, /unexpected response/) do
+        client.search(base: "dc=example,dc=com")
+      end
+    end
+
     # Documents current behavior: octet-string attribute values are carried
     # verbatim. Binary values (objectGUID, userCertificate, ...) survive in the
     # String and are recoverable via String#to_slice. (Typed Bytes accessors
