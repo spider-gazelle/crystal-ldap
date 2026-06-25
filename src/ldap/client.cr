@@ -110,7 +110,11 @@ class LDAP::Client
   rescue IO::Error
     @mutex.synchronize { close }
   rescue e
-    Log.error(exception: e) { e.message }
+    # A deliberate local #close (e.g. after a failed bind) unblocks the parked
+    # read_bytes and surfaces as a decode error here — that is an expected
+    # teardown, not a fault to log. Logging it raced the Log dispatcher at
+    # shutdown and crashed with Channel::ClosedError (issue #2).
+    Log.error(exception: e) { e.message } unless @socket.closed?
     @mutex.synchronize do
       @requests.values.each(&.reject(e))
       @requests.clear
