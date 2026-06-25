@@ -67,7 +67,7 @@ class LDAP::Client
 
   def search(*args, **opts)
     result = write(*@request.search(*args, **opts)).get
-    results = @results.delete(result.id) || [] of Response
+    results = @mutex.synchronize { @results.delete(result.id) } || [] of Response
 
     if result.tag.search_result?
       details = result.parse_result
@@ -87,7 +87,10 @@ class LDAP::Client
     when Tag::SearchResultReferral
       # TODO::
     when Tag::SearchReturnedData
-      @results[response.id] << response
+      # Guarded by the same mutex as @requests: the read fiber appends here
+      # while a caller fiber deletes in #search — without this they race the
+      # Hash under multi-threading (-Dpreview_mt).
+      @mutex.synchronize { @results[response.id] << response }
     else
       request = @mutex.synchronize { @requests.delete response.id }
       if request
