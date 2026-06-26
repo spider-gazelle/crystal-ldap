@@ -6,7 +6,19 @@ require "../ldap"
 class LDAP::Client
   class TlsError < Error; end
 
-  class AuthError < Error; end
+  # Raised when an operation returns a non-success LDAP result code.
+  class OperationError < Error
+    getter result_code : Response::Code
+    getter matched_dn : String
+    getter error_message : String
+
+    def initialize(operation : String, @result_code : Response::Code, @matched_dn : String, @error_message : String)
+      super("#{operation} failed with #{@result_code}: #{@error_message}")
+    end
+  end
+
+  # Bind failure is an authentication concern callers often handle on its own.
+  class AuthError < OperationError; end
 
   def initialize(socket, tls_context : OpenSSL::SSL::Context::Client? = nil)
     @results = Hash(Int32, Array(Response)).new do |h, k|
@@ -55,7 +67,7 @@ class LDAP::Client
     if result.tag.bind_result?
       details = result.parse_bind_response
       result_code = details[:result_code]
-      raise AuthError.new("bind failed with #{result_code}: #{details[:error_message]}") unless result_code.success?
+      raise AuthError.new("bind", result_code, details[:matched_dn], details[:error_message]) unless result_code.success?
     else
       raise Error.new("unexpected response: #{result.tag}")
     end
@@ -72,7 +84,7 @@ class LDAP::Client
     if result.tag.search_result?
       details = result.parse_result
       result_code = details[:result_code]
-      raise AuthError.new("search failed with #{result_code}: #{details[:error_message]}") unless result_code.in?(Response::SEARCH_SUCCESS)
+      raise OperationError.new("search", result_code, details[:matched_dn], details[:error_message]) unless result_code.in?(Response::SEARCH_SUCCESS)
 
       results.map(&.parse_search_data)
     else
