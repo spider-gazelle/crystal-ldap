@@ -8,7 +8,11 @@ class LDAP::Client
 
   class AuthError < Error; end
 
-  def initialize(socket, tls_context : OpenSSL::SSL::Context::Client? = nil)
+  # *max_message_size* caps how many bytes the BER decoder will allocate or read
+  # for a single received message and its nested values, guarding against a
+  # hostile server forcing a huge allocation. Defaults to 16 MiB; `0` or a
+  # negative value disables the bound.
+  def initialize(socket, tls_context : OpenSSL::SSL::Context::Client? = nil, @max_message_size : Int32 = 16 * 1024 * 1024)
     @results = Hash(Int32, Array(Response)).new do |h, k|
       h[k] = [] of Response
     end
@@ -101,10 +105,20 @@ class LDAP::Client
     end
   end
 
+  # Read one LDAPMessage, capping how much the BER decoder will allocate/read so
+  # a hostile or buggy server can't force a huge allocation (see the
+  # *max_message_size* constructor option).
+  private def read_message(io : IO) : BER
+    message = BER.new
+    message.max_content_length = @max_message_size
+    message.read(io)
+    message
+  end
+
   protected def process!
     socket = @socket
     while !socket.closed?
-      data = socket.read_bytes(ASN1::BER)
+      data = read_message(socket)
       parse_response data
     end
   rescue IO::Error
@@ -137,7 +151,7 @@ class LDAP::Client
     socket.write @request.start_tls[1].to_slice
 
     # Check if the remote supports TLS
-    response = Response.from_response socket.read_bytes(ASN1::BER)
+    response = Response.from_response read_message(socket)
     raise TlsError.new("expected a start_tls result") unless response.tag.extended_response?
     result = response.parse_result[:result_code]
     raise TlsError.new("start_tls failed with: #{result}") unless result.success?

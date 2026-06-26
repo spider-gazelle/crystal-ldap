@@ -138,4 +138,35 @@ describe LDAP::Client do
       results[0]["objectGUID"][0].to_slice.should eq(guid)
     end
   end
+
+  describe "max_message_size" do
+    # A hostile/buggy server can declare a huge length and force the read fiber
+    # to allocate (or read) far beyond any real message. The per-client cap makes
+    # bindata reject the frame before allocating; here a 1 KiB cap rejects a frame
+    # declaring 5000 bytes of content. (5000, not ~2 GiB, so the test is safe to
+    # run even against an unbounded read.)
+    it "rejects a message whose declared length exceeds the cap" do
+      # SEQUENCE, long-form length 0x1388 (5000), no payload follows.
+      socket = FakeSocket.new { |_id| Bytes[0x30, 0x82, 0x13, 0x88] }
+      client = LDAP::Client.new(socket, max_message_size: 1024)
+
+      expect_raises(ASN1::ContentTooLarge) do
+        client.search(base: "dc=example,dc=com")
+      end
+    end
+
+    # The dangerous case the cap must also stop: a small outer frame that smuggles
+    # a child declaring an oversized length. bindata propagates the cap into
+    # children, so it's rejected at the cap check — before any large allocation —
+    # while decoding the message.
+    it "rejects an oversized child smuggled inside a small frame" do
+      # SEQUENCE (len 6) { OCTET STRING declaring ~2 GiB }: outer fits the cap, child doesn't.
+      socket = FakeSocket.new { |_id| Bytes[0x30, 0x06, 0x04, 0x84, 0x7F, 0xFF, 0xFF, 0xFF] }
+      client = LDAP::Client.new(socket, max_message_size: 1024)
+
+      expect_raises(ASN1::ContentTooLarge) do
+        client.search(base: "dc=example,dc=com")
+      end
+    end
+  end
 end

@@ -5,6 +5,7 @@ crystal: ">= 0.36.1"
 dependencies:
   bindata:
     github: spider-gazelle/bindata
+    version: ~> 3.0
   promise:
     github: spider-gazelle/promise
 
