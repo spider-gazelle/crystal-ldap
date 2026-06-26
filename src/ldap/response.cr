@@ -34,6 +34,7 @@ class LDAP::Response
     Busy                         = 51
     Unavailable                  = 52
     UnwillingToPerform           = 53
+    LoopDetect                   = 54
     NamingViolation              = 64
     ObjectClassViolation         = 65
     NotAllowedOnNonLeaf          = 66
@@ -49,7 +50,9 @@ class LDAP::Response
 
   def initialize(message_id, payload, @control = nil)
     @id = message_id.get_integer.to_i
-    @tag = LDAP::Tag.from_value(payload.tag_number)
+    # Tag.new (not from_value) so an unmodelled protocol-op tag is preserved
+    # rather than crashing the read fiber with a bare ArgumentError.
+    @tag = LDAP::Tag.new(payload.tag_number.to_i32)
     @payload = payload.children
   end
 
@@ -89,7 +92,7 @@ class LDAP::Response
     raise LDAP::Error.new("Invalid LDAP result size") unless sequence.size >= 3
 
     {
-      result_code:   Code.from_value(sequence[0].get_integer),
+      result_code:   Code.new(sequence[0].get_integer.to_i32!),
       matched_dn:    sequence[1].get_string,
       error_message: sequence[2].get_string,
     }
@@ -111,8 +114,6 @@ class LDAP::Response
   end
 
   def result_message(code : Int)
-    Code.from_value(code).to_s.underscore.gsub('_', ' ')
-  rescue e
-    "unknown result (#{code})"
+    Code.new(code.to_i32!).to_s.underscore.gsub('_', ' ')
   end
 end
