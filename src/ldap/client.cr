@@ -96,6 +96,36 @@ class LDAP::Client
     end
   end
 
+  # https://tools.ietf.org/html/rfc4511#section-4.6
+  def modify(dn : String, changes : Enumerable(Modification)) : self
+    expect_result(@request.modify(dn, changes), Tag::ModifyResponse, "modify")
+    self
+  end
+
+  # https://tools.ietf.org/html/rfc4511#section-4.7
+  def add(dn : String, attributes : Hash(String, Array(String))) : self
+    expect_result(@request.add(dn, attributes), Tag::AddResponse, "add")
+    self
+  end
+
+  # https://tools.ietf.org/html/rfc4511#section-4.8
+  def delete(dn : String) : self
+    expect_result(@request.delete(dn), Tag::DeleteResponse, "delete")
+    self
+  end
+
+  # Sends a single-result operation, awaits its response, and raises
+  # OperationError on a non-success result code.
+  private def expect_result(request : {Int32, BER}, expected : Tag, operation : String) : Response
+    result = write(*request).get
+    raise Error.new("unexpected response: #{result.tag}") unless result.tag == expected
+    details = result.parse_result
+    unless details[:result_code].success?
+      raise OperationError.new(operation, details[:result_code], details[:matched_dn], details[:error_message])
+    end
+    result
+  end
+
   protected def parse_response(packet : BER)
     response = Response.from_response packet
     # Search results are returned in multiple packets

@@ -131,4 +131,42 @@ class LDAP::Request
       build(search_request)
     end
   end
+
+  # https://tools.ietf.org/html/rfc4511#section-4.6
+  def modify(dn : String, changes : Enumerable(Modification))
+    change_list = changes.map do |change|
+      LDAP.sequence({
+        BER.new.set_integer(change.operation.value, UniversalTags::Enumerated),
+        LDAP.sequence({
+          BER.new.set_string(change.type, UniversalTags::OctetString),
+          LDAP.set(change.values.map { |value| BER.new.set_string(value, UniversalTags::OctetString) }),
+        }),
+      })
+    end
+    build(LDAP.app_sequence({
+      BER.new.set_string(dn, UniversalTags::OctetString),
+      LDAP.sequence(change_list),
+    }, Tag::ModifyRequest))
+  end
+
+  # https://tools.ietf.org/html/rfc4511#section-4.7
+  def add(dn : String, attributes : Hash(String, Array(String)))
+    attribute_list = attributes.map do |type, values|
+      LDAP.sequence({
+        BER.new.set_string(type, UniversalTags::OctetString),
+        LDAP.set(values.map { |value| BER.new.set_string(value, UniversalTags::OctetString) }),
+      })
+    end
+    build(LDAP.app_sequence({
+      BER.new.set_string(dn, UniversalTags::OctetString),
+      LDAP.sequence(attribute_list),
+    }, Tag::AddRequest))
+  end
+
+  # https://tools.ietf.org/html/rfc4511#section-4.8
+  def delete(dn : String)
+    # DelRequest is [APPLICATION 10] LDAPDN — a primitive whose content is the
+    # DN itself, not a constructed sequence.
+    build(BER.new.set_string(dn, Tag::DeleteRequest.to_i, TagClass::Application))
+  end
 end
