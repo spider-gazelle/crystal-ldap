@@ -77,7 +77,6 @@ class LDAP::Client
     end
     self
   rescue e
-    close
     raise e
   end
 
