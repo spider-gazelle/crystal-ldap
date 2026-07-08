@@ -1,4 +1,4 @@
-require "./helper"
+require "./spec_helper"
 
 # LDAPMessage { messageID, protocolOp } built from the library's own BER
 # helpers, so fixtures track the encoder.

@@ -1,11 +1,11 @@
 name: ldap
 version: 0.9.1
-crystal: ">= 0.36.1"
+crystal: ">= 1.0.0"
 
 dependencies:
   bindata:
     github: spider-gazelle/bindata
-    version: ~> 3.0
+    branch: master
   promise:
     github: spider-gazelle/promise
 

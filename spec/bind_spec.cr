@@ -1,4 +1,4 @@
-require "./helper"
+require "./spec_helper"
 
 describe LDAP do
   user = "cn=read-only-admin,dc=example,dc=com"

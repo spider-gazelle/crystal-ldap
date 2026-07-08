@@ -1,4 +1,4 @@
-require "./helper"
+require "./spec_helper"
 
 describe LDAP::Request do
   # RFC 4511 §4.1.1.1: "The message ID of zero is reserved for unsolicited

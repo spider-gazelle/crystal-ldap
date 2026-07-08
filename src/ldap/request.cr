@@ -98,9 +98,9 @@ class LDAP::Request
     size : Int = 0,
     time : Int = 0,
     paged_searches_supported : Bool = false,
-    sort : String | SortControl | BER | Nil = nil
+    sort : String | SortControl | BER | Nil = nil,
   )
-    attributes = attributes.map { |a| BER.new.set_string(a.to_s, UniversalTags::OctetString) }
+    attributes = attributes.map { |attr| BER.new.set_string(attr.to_s, UniversalTags::OctetString) }
 
     # support string based filters
     filter = FilterParser.parse(filter) if filter.is_a?(String)

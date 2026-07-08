@@ -1,4 +1,4 @@
-require "./helper"
+require "./spec_helper"
 
 private def concat(*parts : Bytes) : Bytes
   io = IO::Memory.new

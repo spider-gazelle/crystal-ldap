@@ -1,4 +1,4 @@
-require "./helper"
+require "./spec_helper"
 
 # A result-bearing LDAPMessage { messageID, [APPLICATION tag] { resultCode, matchedDN, errorMessage } }.
 private def result_message(id : Int32, tag : LDAP::Tag, code : Int32, dn = "", msg = "") : Bytes
