@@ -46,17 +46,17 @@ describe LDAP::Client do
       results = client.search(base: "dc=example,dc=com", filter: "(objectClass=*)")
 
       results.size.should eq(2)
-      results[0]["dn"].should eq(["uid=a,dc=example,dc=com"])
+      results[0].dn.should eq("uid=a,dc=example,dc=com")
       results[0]["cn"].should eq(["Alice"])
       results[0]["objectClass"].should eq(["person", "top"])
-      results[1]["dn"].should eq(["uid=b,dc=example,dc=com"])
+      results[1].dn.should eq("uid=b,dc=example,dc=com")
       results[1]["cn"].should eq(["Bob"])
     end
 
     it "returns an empty array when the search yields no entries" do
       socket = FakeSocket.new { |id| search_done(id) }
       client = LDAP::Client.new(socket)
-      client.search(base: "dc=example,dc=com", filter: "(cn=nobody)").should eq([] of Hash(String, Array(String)))
+      client.search(base: "dc=example,dc=com", filter: "(cn=nobody)").should eq([] of LDAP::Entry)
     end
 
     # End-to-end consequence of tolerant tag decoding: a response carrying an
@@ -79,11 +79,9 @@ describe LDAP::Client do
       end
     end
 
-    # Documents current behavior: octet-string attribute values are carried
-    # verbatim. Binary values (objectGUID, userCertificate, ...) survive in the
-    # String and are recoverable via String#to_slice. (Typed Bytes accessors
-    # are a separate API concern.)
-    it "preserves the raw bytes of binary attribute values" do
+    # Binary values (objectGUID, userCertificate, ...) are exposed as raw Bytes
+    # via Entry#bytes, not mangled through a String.
+    it "exposes binary attribute values as raw bytes" do
       guid = Bytes[0x00, 0xff, 0xfe, 0x80, 0x41, 0x00, 0xc3, 0x28]
       socket = FakeSocket.new do |id|
         concat(search_entry(id, "uid=a,dc=example,dc=com", {"objectGUID" => [guid]}), search_done(id))
@@ -91,7 +89,33 @@ describe LDAP::Client do
       client = LDAP::Client.new(socket)
       results = client.search(base: "dc=example,dc=com")
 
-      results[0]["objectGUID"][0].to_slice.should eq(guid)
+      results[0].bytes("objectGUID").first.should eq(guid)
+    end
+
+    it "raises SearchLimitError carrying the partial entries on a size limit" do
+      socket = FakeSocket.new do |id|
+        concat(
+          search_entry(id, "uid=a,dc=example,dc=com", {"cn" => ["Alice"]}),
+          search_done(id, LDAP::Response::Code::SizeLimitExceeded.value),
+        )
+      end
+      client = LDAP::Client.new(socket)
+
+      err = expect_raises(LDAP::Client::SearchLimitError) do
+        client.search(base: "dc=example,dc=com")
+      end
+      err.result_code.size_limit_exceeded?.should be_true
+      err.entries.size.should eq(1)
+      err.entries[0].dn.should eq("uid=a,dc=example,dc=com")
+    end
+
+    it "treats time and admin limits as SearchLimitError too" do
+      {LDAP::Response::Code::TimeLimitExceeded, LDAP::Response::Code::AdminLimitExceeded}.each do |limit|
+        socket = FakeSocket.new { |id| search_done(id, limit.value) }
+        client = LDAP::Client.new(socket)
+        err = expect_raises(LDAP::Client::SearchLimitError) { client.search(base: "dc=x") }
+        err.result_code.should eq(limit)
+      end
     end
   end
 
@@ -129,8 +153,8 @@ describe LDAP::Client do
     end
 
     # A well-framed SearchResultEntry whose *attribute* declares an oversized
-    # length: only detected in parse_search_data (the caller fiber), which must
-    # also surface it typed.
+    # length: only detected in parse_entry (the caller fiber), which must also
+    # surface it typed.
     it "surfaces a cap breach during search-data parsing as MessageTooLargeError" do
       socket = FakeSocket.new do |id|
         # SearchResultEntry { "dn", attributes SEQ { attribute SEQ declaring ~2 GiB } }

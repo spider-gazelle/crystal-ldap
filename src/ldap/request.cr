@@ -83,7 +83,6 @@ class LDAP::Request
   # scope:  https://tools.ietf.org/html/rfc4511#section-4.5.1.2
   # attrs:      https://tools.ietf.org/html/rfc4511#section-4.5.1.8
   # attrs_only: https://tools.ietf.org/html/rfc4511#section-4.5.1.6
-  # referrals:  https://tools.ietf.org/html/rfc4511#section-4.5.3
   # deref: https://tools.ietf.org/html/rfc4511#section-4.5.1.3
   # size: https://tools.ietf.org/html/rfc4511#section-4.5.1.4
   # time: https://tools.ietf.org/html/rfc4511#section-4.5.1.5
@@ -93,11 +92,9 @@ class LDAP::Request
     scope : SearchScope = SearchScope::WholeSubtree,
     attributes : Enumerable(String) | Enumerable(Symbol) = [] of String,
     attributes_only : Bool = false,
-    return_referrals : Bool = true,
     dereference : DereferenceAliases = DereferenceAliases::Always,
     size : Int = 0,
     time : Int = 0,
-    paged_searches_supported : Bool = false,
     sort : String | SortControl | BER | Nil = nil,
   )
     attributes = attributes.map { |attr| BER.new.set_string(attr.to_s, UniversalTags::OctetString) }

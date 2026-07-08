@@ -105,6 +105,7 @@ module LDAP
   end
 end
 
+require "./ldap/entry"
 require "./ldap/modification"
 require "./ldap/request"
 require "./ldap/response"

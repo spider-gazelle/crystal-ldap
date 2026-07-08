@@ -85,29 +85,28 @@ client.search(base: "dc=example,dc=com", filter: filter)
 
 ```
 
-Search responses are `Array(Hash(String, Array(String)))`
+A search returns `Array(LDAP::Entry)`. Each `Entry` exposes its `dn` separately
+from its `attributes`; attribute values are stored as raw `Bytes` (LDAP octet
+strings are not necessarily UTF-8):
 
 ```crystal
+entries = client.search(base: "dc=example,dc=com", filter: "(uid=einstein)")
 
-[
- {
-  "dn" => ["uid=einstein,dc=example,dc=com"],
-  "objectClass" => ["inetOrgPerson", "organizationalPerson", "person", "top"],
-  "cn" => ["Albert Einstein"],
-  "sn" => ["Einstein"],
-  "uid" => ["einstein"],
-  "mail" => ["einstein@ldap.forumsys.com"],
-  "telephoneNumber" => ["314-159-2653"]
- },
- {
-  "dn" => ["uid=training,dc=example,dc=com"],
-  "uid" => ["training"],
-  "objectClass" => ["inetOrgPerson", "organizationalPerson", "person", "top"],
-  "cn" => ["FS Training"],
-  "sn" => ["training"],
-  "mail" => ["training@forumsys.com"],
-  "telephoneNumber" => ["888-111-2222"]
- }
-]
+entry = entries.first
+entry.dn                  # => "uid=einstein,dc=example,dc=com"
+entry["cn"]               # => ["Albert Einstein"]   (values decoded as String)
+entry["mail"]?            # => ["einstein@ldap.forumsys.com"] or nil if absent
+entry.bytes("objectGUID") # => Array(Bytes)          (raw, for binary attributes)
+entry.keys                # => ["objectClass", "cn", "sn", "uid", "mail", ...]
+```
 
+A server-side size or time limit raises `LDAP::Client::SearchLimitError`, which
+carries the partial `entries` the server returned before stopping:
+
+```crystal
+begin
+  entries = client.search(base: "dc=example,dc=com")
+rescue ex : LDAP::Client::SearchLimitError
+  partial = ex.entries # incomplete, but usable
+end
 ```

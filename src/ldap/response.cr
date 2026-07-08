@@ -45,8 +45,7 @@ class LDAP::Response
     Other                        = 80
   end
 
-  SUCCESS_CODES  = {Code::Success, Code::CompareFalse, Code::CompareTrue, Code::Referral, Code::SaslBindInProgress}
-  SEARCH_SUCCESS = {Code::Success, Code::TimeLimitExceeded, Code::SizeLimitExceeded}
+  SUCCESS_CODES = {Code::Success, Code::CompareFalse, Code::CompareTrue, Code::Referral, Code::SaslBindInProgress}
 
   def initialize(message_id, payload, @control = nil)
     @id = message_id.get_integer.to_i
@@ -98,19 +97,18 @@ class LDAP::Response
     }
   end
 
-  def parse_search_data
+  def parse_entry : LDAP::Entry
     entry = @payload
     raise Error.new("Invalid entry size in search results") unless entry.size >= 2
-    search_entry = entry[0].get_string
-    data = {
-      "dn" => [search_entry],
-    }
+    dn = entry[0].get_string
+    attributes = Hash(String, Array(Bytes)).new
     entry[1].children.each do |attribute|
       key_value = attribute.children
       raise Error.new("Invalid attribute size in search results") unless key_value.size >= 2
-      data[key_value[0].get_string] = key_value[1].children.map(&.get_string)
+      # Values are raw bytes: octet strings are not guaranteed to be UTF-8.
+      attributes[key_value[0].get_string] = key_value[1].children.map(&.get_bytes)
     end
-    data
+    LDAP::Entry.new(dn, attributes)
   end
 
   def result_message(code : Int)
