@@ -1,0 +1,4 @@
+# TODO markers are intentional roadmap signals (e.g. unimplemented referrals
+# and extensible-match filters), not lint violations.
+Documentation/DocumentationAdmonition:
+  Enabled: false

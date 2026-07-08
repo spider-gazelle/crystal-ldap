@@ -1,4 +1,4 @@
-require "./helper"
+require "./spec_helper"
 
 # Decodes a built request's LDAPMessage back into {message_id, protocol-op BER}
 # so builder specs can assert structure without hand-computing every byte.

@@ -1,4 +1,4 @@
-require "./helper"
+require "./spec_helper"
 require "log/spec"
 
 # Reproduces the teardown path behind issue #2: a failed simple bind.

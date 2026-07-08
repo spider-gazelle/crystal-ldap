@@ -145,13 +145,13 @@ class LDAP::Request::Filter
   end
 
   # Joins two or more filters so that all conditions must be true.
-  def &(filter)
-    self.class.join(self, filter)
+  def &(other)
+    self.class.join(self, other)
   end
 
   # Selects entries where either the left or right side are true.
-  def |(filter)
-    self.class.intersect(self, filter)
+  def |(other)
+    self.class.intersect(self, other)
   end
 
   # Negates a filter.

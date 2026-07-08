@@ -1,4 +1,4 @@
-require "./helper"
+require "./spec_helper"
 
 describe LDAP::Request::FilterParser do
   it "should parse a basic filter" do

@@ -25,8 +25,8 @@ class LDAP::Client
   # hostile server forcing a huge allocation. Defaults to 16 MiB; `0` or a
   # negative value disables the bound.
   def initialize(socket, tls_context : OpenSSL::SSL::Context::Client? = nil, @max_message_size : Int32 = 16 * 1024 * 1024)
-    @results = Hash(Int32, Array(Response)).new do |h, k|
-      h[k] = [] of Response
+    @results = Hash(Int32, Array(Response)).new do |hash, key|
+      hash[key] = [] of Response
     end
 
     # Send without delay as we will be using `#flush`

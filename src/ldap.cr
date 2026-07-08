@@ -68,7 +68,7 @@ module LDAP
     data : Enumerable(ASN1::BER),
     tag_class : TagClass = TagClass::Universal,
     tag : Int | UniversalTags = UniversalTags::Sequence,
-    constructed : Bool = true
+    constructed : Bool = true,
   ) : ASN1::BER
     sequence = ASN1::BER.new
     sequence.tag_class = tag_class
