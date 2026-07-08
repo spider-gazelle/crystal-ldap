@@ -114,6 +114,41 @@ class LDAP::Client
     self
   end
 
+  # https://tools.ietf.org/html/rfc4511#section-4.9
+  def modify_dn(dn : String, new_rdn : String, delete_old_rdn : Bool = true, new_superior : String? = nil) : self
+    expect_result(@request.modify_dn(dn, new_rdn, delete_old_rdn, new_superior), Tag::ModifyRDNResponse, "modify_dn")
+    self
+  end
+
+  # https://tools.ietf.org/html/rfc4511#section-4.10
+  # Returns whether the entry's attribute holds the asserted value.
+  def compare(dn : String, attribute : String, value : String) : Bool
+    result = write(*@request.compare(dn, attribute, value)).get
+    raise Error.new("unexpected response: #{result.tag}") unless result.tag.compare_response?
+    details = result.parse_result
+    result_code = details[:result_code]
+    case result_code
+    when .compare_true?  then true
+    when .compare_false? then false
+    else
+      raise OperationError.new("compare", result_code, details[:matched_dn], details[:error_message])
+    end
+  end
+
+  # https://tools.ietf.org/html/rfc4511#section-4.3
+  # Sends an UnbindRequest (which has no response) and closes the connection.
+  def unbind : Nil
+    _, request = @request.unbind
+    @mutex.synchronize do
+      # Idempotent teardown: unlike #write, a closed socket is a no-op, not an error.
+      unless @socket.closed?
+        @socket.write_bytes request
+        @socket.flush
+      end
+    end
+    close
+  end
+
   # Sends a single-result operation, awaits its response, and raises
   # OperationError on a non-success result code.
   private def expect_result(request : {Int32, BER}, expected : Tag, operation : String) : Response
