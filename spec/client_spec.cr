@@ -106,9 +106,11 @@ describe LDAP::Client do
       socket = FakeSocket.new { |_id| Bytes[0x30, 0x82, 0x13, 0x88] }
       client = LDAP::Client.new(socket, max_message_size: 1024)
 
-      expect_raises(ASN1::ContentTooLarge) do
+      # Surfaced as an LDAP-typed error, not a raw bindata ASN1::ContentTooLarge.
+      err = expect_raises(LDAP::Client::MessageTooLargeError) do
         client.search(base: "dc=example,dc=com")
       end
+      err.should be_a(LDAP::Error)
     end
 
     # The dangerous case the cap must also stop: a small outer frame that smuggles
@@ -120,7 +122,26 @@ describe LDAP::Client do
       socket = FakeSocket.new { |_id| Bytes[0x30, 0x06, 0x04, 0x84, 0x7F, 0xFF, 0xFF, 0xFF] }
       client = LDAP::Client.new(socket, max_message_size: 1024)
 
-      expect_raises(ASN1::ContentTooLarge) do
+      # Raised while decoding children (parse_response), still surfaced typed.
+      expect_raises(LDAP::Client::MessageTooLargeError) do
+        client.search(base: "dc=example,dc=com")
+      end
+    end
+
+    # A well-framed SearchResultEntry whose *attribute* declares an oversized
+    # length: only detected in parse_search_data (the caller fiber), which must
+    # also surface it typed.
+    it "surfaces a cap breach during search-data parsing as MessageTooLargeError" do
+      socket = FakeSocket.new do |id|
+        # SearchResultEntry { "dn", attributes SEQ { attribute SEQ declaring ~2 GiB } }
+        entry = Bytes[0x30, 0x11, 0x02, 0x01, id.to_u8, 0x64, 0x0C,
+          0x04, 0x02, 0x64, 0x6E,                         # objectName "dn"
+          0x30, 0x06, 0x30, 0x84, 0x7F, 0xFF, 0xFF, 0xFF] # attributes { bad attribute }
+        concat(entry, search_done(id))
+      end
+      client = LDAP::Client.new(socket, max_message_size: 1024)
+
+      expect_raises(LDAP::Client::MessageTooLargeError) do
         client.search(base: "dc=example,dc=com")
       end
     end
