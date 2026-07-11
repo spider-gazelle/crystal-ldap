@@ -169,4 +169,34 @@ class LDAP::Request
     # DN itself, not a constructed sequence.
     build(BER.new.set_string(dn, Tag::DeleteRequest.to_i, TagClass::Application))
   end
+
+  # https://tools.ietf.org/html/rfc4511#section-4.9
+  def modify_dn(dn : String, new_rdn : String, delete_old_rdn : Bool = true, new_superior : String? = nil)
+    fields = [
+      BER.new.set_string(dn, UniversalTags::OctetString),
+      BER.new.set_string(new_rdn, UniversalTags::OctetString),
+      BER.new.set_boolean(delete_old_rdn),
+    ]
+    # newSuperior is [0] LDAPDN OPTIONAL — a context-specific primitive.
+    fields << BER.new.set_string(new_superior, 0, TagClass::ContextSpecific) if new_superior
+    build(LDAP.app_sequence(fields, Tag::ModifyRDNRequest))
+  end
+
+  # https://tools.ietf.org/html/rfc4511#section-4.10
+  def compare(dn : String, attribute : String, value : String)
+    ava = LDAP.sequence({
+      BER.new.set_string(attribute, UniversalTags::OctetString),
+      BER.new.set_string(value, UniversalTags::OctetString),
+    })
+    build(LDAP.app_sequence({
+      BER.new.set_string(dn, UniversalTags::OctetString),
+      ava,
+    }, Tag::CompareRequest))
+  end
+
+  # https://tools.ietf.org/html/rfc4511#section-4.3
+  def unbind
+    # UnbindRequest is [APPLICATION 2] NULL — a primitive with no content.
+    build(BER.new.set_string("", Tag::UnbindRequest.to_i, TagClass::Application))
+  end
 end
