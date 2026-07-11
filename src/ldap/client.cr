@@ -6,6 +6,9 @@ require "../ldap"
 class LDAP::Client
   class TlsError < Error; end
 
+  # Raised when a received message exceeds `max_message_size` (see `#initialize`).
+  class MessageTooLargeError < Error; end
+
   # Raised when an operation returns a non-success LDAP result code.
   class OperationError < Error
     getter result_code : Response::Code
@@ -90,7 +93,9 @@ class LDAP::Client
       result_code = details[:result_code]
       raise OperationError.new("search", result_code, details[:matched_dn], details[:error_message]) unless result_code.in?(Response::SEARCH_SUCCESS)
 
-      results.map(&.parse_search_data)
+      # parse_search_data decodes nested children here (caller fiber); a cap
+      # breach must surface typed like the read-fiber paths.
+      wrap_too_large { results.map(&.parse_search_data) }
     else
       raise Error.new("unexpected response: #{result.tag}")
     end
@@ -186,10 +191,20 @@ class LDAP::Client
   # a hostile or buggy server can't force a huge allocation (see the
   # *max_message_size* constructor option).
   private def read_message(io : IO) : BER
-    message = BER.new
-    message.max_content_length = @max_message_size
-    message.read(io)
-    message
+    wrap_too_large do
+      message = BER.new
+      message.max_content_length = @max_message_size
+      message.read(io)
+      message
+    end
+  end
+
+  # Re-raises bindata's `ASN1::ContentTooLarge` (from the `max_message_size` cap)
+  # as an LDAP-typed error, so callers only ever see `LDAP::Error` subclasses.
+  private def wrap_too_large(&)
+    yield
+  rescue ex : ASN1::ContentTooLarge
+    raise MessageTooLargeError.new(ex.message)
   end
 
   protected def process!
@@ -201,13 +216,16 @@ class LDAP::Client
   rescue IO::Error
     @mutex.synchronize { close }
   rescue e
+    # A ContentTooLarge raised while decoding nested children surfaces here as an
+    # LDAP-typed error (the read_message rescue only covers the top-level frame).
+    error = e.is_a?(ASN1::ContentTooLarge) ? MessageTooLargeError.new(e.message) : e
     # A deliberate local #close (e.g. after a failed bind) unblocks the parked
     # read_bytes and surfaces as a decode error here — that is an expected
     # teardown, not a fault to log. Logging it raced the Log dispatcher at
     # shutdown and crashed with Channel::ClosedError (issue #2).
-    Log.error(exception: e) { e.message } unless @socket.closed?
+    Log.error(exception: error) { error.message } unless @socket.closed?
     @mutex.synchronize do
-      @requests.values.each(&.reject(e))
+      @requests.values.each(&.reject(error))
       @requests.clear
       close
     end
