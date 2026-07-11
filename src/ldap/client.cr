@@ -23,6 +23,16 @@ class LDAP::Client
   # Bind failure is an authentication concern callers often handle on its own.
   class AuthError < OperationError; end
 
+  # Raised when a search hit a server-side size, time or administrative limit:
+  # it carries the partial `entries` the server returned before stopping.
+  class SearchLimitError < OperationError
+    getter entries : Array(Entry)
+
+    def initialize(result_code : Response::Code, matched_dn : String, error_message : String, @entries : Array(Entry))
+      super("search", result_code, matched_dn, error_message)
+    end
+  end
+
   # *max_message_size* caps how many bytes the BER decoder will allocate or read
   # for a single received message and its nested values, guarding against a
   # hostile server forcing a huge allocation. Defaults to 16 MiB; `0` or a
@@ -84,21 +94,43 @@ class LDAP::Client
     raise e
   end
 
-  def search(*args, **opts)
-    result = write(*@request.search(*args, **opts)).get
-    results = @mutex.synchronize { @results.delete(result.id) } || [] of Response
+  # Runs a search and returns the matching entries. On a server-side size/time
+  # limit it raises `SearchLimitError` carrying the partial entries; on any other
+  # failure code it raises `OperationError`.
+  def search(
+    base : String,
+    filter : Request::Filter | String = Request::Filter.equal("objectClass", "*"),
+    scope : SearchScope = SearchScope::WholeSubtree,
+    attributes : Enumerable(String) | Enumerable(Symbol) = [] of String,
+    attributes_only : Bool = false,
+    dereference : DereferenceAliases = DereferenceAliases::Always,
+    size : Int = 0,
+    time : Int = 0,
+    sort : String | Request::SortControl | BER | Nil = nil,
+  ) : Array(Entry)
+    message_id, request = @request.search(
+      base: base, filter: filter, scope: scope, attributes: attributes,
+      attributes_only: attributes_only, dereference: dereference,
+      size: size, time: time, sort: sort,
+    )
+    result = write(message_id, request).get
+    responses = @mutex.synchronize { @results.delete(result.id) } || [] of Response
 
-    if result.tag.search_result?
-      details = result.parse_result
-      result_code = details[:result_code]
-      raise OperationError.new("search", result_code, details[:matched_dn], details[:error_message]) unless result_code.in?(Response::SEARCH_SUCCESS)
+    raise Error.new("unexpected response: #{result.tag}") unless result.tag.search_result?
 
-      # parse_search_data decodes nested children here (caller fiber); a cap
-      # breach must surface typed like the read-fiber paths.
-      wrap_too_large { results.map(&.parse_search_data) }
-    else
-      raise Error.new("unexpected response: #{result.tag}")
+    details = result.parse_result
+    code = details[:result_code]
+    # parse_entry decodes nested children here (caller fiber); a cap breach must
+    # surface typed like the read-fiber paths.
+    entries = wrap_too_large { responses.map(&.parse_entry) }
+
+    return entries if code.success?
+    # size/time/admin limits all mean the server stopped early and returned
+    # partial results — surface them together, carrying whatever arrived.
+    if code.size_limit_exceeded? || code.time_limit_exceeded? || code.admin_limit_exceeded?
+      raise SearchLimitError.new(code, details[:matched_dn], details[:error_message], entries)
     end
+    raise OperationError.new("search", code, details[:matched_dn], details[:error_message])
   end
 
   # https://tools.ietf.org/html/rfc4511#section-4.6

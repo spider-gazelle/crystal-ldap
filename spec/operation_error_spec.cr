@@ -43,12 +43,13 @@ describe LDAP::Client do
     err.result_code.insufficient_access_rights?.should be_true
   end
 
-  # SizeLimitExceeded/TimeLimitExceeded are "soft" search outcomes (partial
-  # results), still in SEARCH_SUCCESS — they must NOT raise. Pins that kept set
-  # before the later search-typing work revisits how partial results surface.
-  it "does not raise when a search hits the size limit" do
+  # SizeLimitExceeded/TimeLimitExceeded are partial-result outcomes: search
+  # raises the dedicated SearchLimitError (carrying whatever entries arrived)
+  # rather than a generic OperationError.
+  it "raises SearchLimitError when a search hits the size limit" do
     socket = FakeSocket.new { |id| result_message(id, LDAP::Tag::SearchResult, LDAP::Response::Code::SizeLimitExceeded.value) }
     client = LDAP::Client.new(socket)
-    client.search(base: "dc=x").should eq([] of Hash(String, Array(String)))
+    err = expect_raises(LDAP::Client::SearchLimitError) { client.search(base: "dc=x") }
+    err.entries.should be_empty
   end
 end
