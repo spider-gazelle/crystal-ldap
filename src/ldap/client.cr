@@ -9,6 +9,9 @@ class LDAP::Client
   # Raised when a received message exceeds `max_message_size` (see `#initialize`).
   class MessageTooLargeError < Error; end
 
+  # Raised when an operation gets no response within `timeout` (see `#initialize`).
+  class TimeoutError < Error; end
+
   # Raised when an operation returns a non-success LDAP result code.
   class OperationError < Error
     getter result_code : Response::Code
@@ -37,7 +40,13 @@ class LDAP::Client
   # for a single received message and its nested values, guarding against a
   # hostile server forcing a huge allocation. Defaults to 16 MiB; `0` or a
   # negative value disables the bound.
-  def initialize(socket, tls_context : OpenSSL::SSL::Context::Client? = nil, @max_message_size : Int32 = 16 * 1024 * 1024)
+  #
+  # *timeout* bounds how long each operation waits for its response before
+  # raising `TimeoutError`. `nil` (the default) waits indefinitely. A timed-out
+  # operation drops its pending state and leaves the connection usable: any late
+  # data the server still streams for it is ignored. (The connection is not
+  # abandoned server-side — LDAP Abandon is a separate, future operation.)
+  def initialize(socket, tls_context : OpenSSL::SSL::Context::Client? = nil, @max_message_size : Int32 = 16 * 1024 * 1024, @timeout : Time::Span? = nil)
     @results = Hash(Int32, Array(Response)).new do |hash, key|
       hash[key] = [] of Response
     end
@@ -79,8 +88,26 @@ class LDAP::Client
     end
   end
 
+  # Writes a request and waits for its response, bounded by #timeout when set.
+  # On timeout the pending request is dropped and TimeoutError is raised.
+  private def send(request : {Int32, BER}) : Response
+    message_id, sequence = request
+    promise = write(message_id, sequence)
+    if span = @timeout
+      spawn { Promise.timeout(promise, span) }
+    end
+    promise.get
+  rescue Promise::Timeout
+    # Drop the pending request and any partial search results accumulated for it.
+    @mutex.synchronize do
+      @requests.delete(message_id)
+      @results.delete(message_id)
+    end
+    raise TimeoutError.new("operation timed out after #{@timeout}")
+  end
+
   def authenticate(username : String = "", password : String = "")
-    result = write(*@request.authenticate(username, password)).get
+    result = send(@request.authenticate(username, password))
     if result.tag.bind_result?
       details = result.parse_bind_response
       result_code = details[:result_code]
@@ -108,12 +135,11 @@ class LDAP::Client
     time : Int = 0,
     sort : String | Request::SortControl | BER | Nil = nil,
   ) : Array(Entry)
-    message_id, request = @request.search(
+    result = send(@request.search(
       base: base, filter: filter, scope: scope, attributes: attributes,
       attributes_only: attributes_only, dereference: dereference,
       size: size, time: time, sort: sort,
-    )
-    result = write(message_id, request).get
+    ))
     responses = @mutex.synchronize { @results.delete(result.id) } || [] of Response
 
     raise Error.new("unexpected response: #{result.tag}") unless result.tag.search_result?
@@ -160,7 +186,7 @@ class LDAP::Client
   # https://tools.ietf.org/html/rfc4511#section-4.10
   # Returns whether the entry's attribute holds the asserted value.
   def compare(dn : String, attribute : String, value : String) : Bool
-    result = write(*@request.compare(dn, attribute, value)).get
+    result = send(@request.compare(dn, attribute, value))
     raise Error.new("unexpected response: #{result.tag}") unless result.tag.compare_response?
     details = result.parse_result
     result_code = details[:result_code]
@@ -189,7 +215,7 @@ class LDAP::Client
   # Sends a single-result operation, awaits its response, and raises
   # OperationError on a non-success result code.
   private def expect_result(request : {Int32, BER}, expected : Tag, operation : String) : Response
-    result = write(*request).get
+    result = send(request)
     raise Error.new("unexpected response: #{result.tag}") unless result.tag == expected
     details = result.parse_result
     unless details[:result_code].success?
@@ -207,8 +233,12 @@ class LDAP::Client
     when Tag::SearchReturnedData
       # Guarded by the same mutex as @requests: the read fiber appends here
       # while a caller fiber deletes in #search — without this they race the
-      # Hash under multi-threading (-Dpreview_mt).
-      @mutex.synchronize { @results[response.id] << response }
+      # Hash under multi-threading (-Dpreview_mt). Only accumulate while the
+      # request is still pending, so a slow server can't re-grow @results after
+      # a timed-out search cleaned it up.
+      @mutex.synchronize do
+        @results[response.id] << response if @requests.has_key?(response.id)
+      end
     else
       request = @mutex.synchronize { @requests.delete response.id }
       if request
