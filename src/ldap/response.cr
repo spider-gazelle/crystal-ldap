@@ -45,8 +45,6 @@ class LDAP::Response
     Other                        = 80
   end
 
-  SUCCESS_CODES = {Code::Success, Code::CompareFalse, Code::CompareTrue, Code::Referral, Code::SaslBindInProgress}
-
   def initialize(message_id, payload, @control = nil)
     @id = message_id.get_integer.to_i
     # Tag.new (not from_value) so an unmodelled protocol-op tag is preserved
@@ -111,6 +109,22 @@ class LDAP::Response
       return inner.children[1].get_string.to_slice
     end
     nil
+  end
+
+  # The referral [3] URIs of an LDAPResult (present when resultCode is referral),
+  # or nil when the field is absent. Only meaningful on a search/modify/compare
+  # result — for those, the optional 4th payload element is the referral field
+  # (a bind response's optional 4th element is serverSaslCreds, read separately).
+  def referral : Array(String)?
+    field = @payload[3]?
+    return nil if field.nil?
+    field.children.map(&.get_string)
+  end
+
+  # The URIs carried by a SearchResultReference (tag 19), whose payload is the
+  # SEQUENCE OF URI directly.
+  def referral_uris : Array(String)
+    @payload.map(&.get_string)
   end
 
   def parse_entry : LDAP::Entry

@@ -36,6 +36,20 @@ class LDAP::Client
     end
   end
 
+  # Raised when the server returns a referral (result code) or continuation
+  # references (SearchResultReference) — the requested data lives, wholly or
+  # partly, on another server. *referrals* holds the LDAP URLs; *entries* holds
+  # whatever a search found locally before the referral. The client surfaces
+  # referrals but does not follow them.
+  class ReferralError < OperationError
+    getter referrals : Array(String)
+    getter entries : Array(Entry)
+
+    def initialize(result_code : Response::Code, matched_dn : String, error_message : String, @referrals : Array(String), @entries : Array(Entry) = [] of Entry)
+      super("referral", result_code, matched_dn, error_message)
+    end
+  end
+
   # *max_message_size* caps how many bytes the BER decoder will allocate or read
   # for a single received message and its nested values, guarding against a
   # hostile server forcing a huge allocation. Defaults to 16 MiB; `0` or a
@@ -121,9 +135,10 @@ class LDAP::Client
     raise e
   end
 
-  # Runs a search and returns the matching entries. On a server-side size/time
-  # limit it raises `SearchLimitError` carrying the partial entries; on any other
-  # failure code it raises `OperationError`.
+  # Runs a search and returns the matching entries. Raises `ReferralError` (with
+  # any entries found + the referral URLs) when the result set is incomplete
+  # because it lives elsewhere; `SearchLimitError` (with the partial entries) on a
+  # server-side size/time/admin limit; `OperationError` on any other failure code.
   def search(
     base : String,
     filter : Request::Filter | String = Request::Filter.equal("objectClass", "*"),
@@ -146,9 +161,21 @@ class LDAP::Client
 
     details = result.parse_result
     code = details[:result_code]
-    # parse_entry decodes nested children here (caller fiber); a cap breach must
-    # surface typed like the read-fiber paths.
-    entries = wrap_too_large { responses.map(&.parse_entry) }
+    # @results now holds both entries (tag 4) and continuation references (tag 19).
+    # parse_entry / referral_uris / result.referral all decode nested children here
+    # (caller fiber); a cap breach must surface typed like the read-fiber paths.
+    entries = wrap_too_large { responses.select(&.tag.search_returned_data?).map(&.parse_entry) }
+
+    # A referral means the result set is incomplete — surface it (with whatever
+    # was found), never silently return partial data. Checked before the limit/
+    # success codes: a referral takes precedence (it already implies incompleteness).
+    if code.referral? || responses.any?(&.tag.search_result_referral?)
+      referrals = wrap_too_large do
+        (result.referral || [] of String) +
+          responses.select(&.tag.search_result_referral?).flat_map(&.referral_uris)
+      end
+      raise ReferralError.new(code, details[:matched_dn], details[:error_message], referrals, entries)
+    end
 
     return entries if code.success?
     # size/time/admin limits all mean the server stopped early and returned
@@ -161,9 +188,10 @@ class LDAP::Client
 
   # Streaming, auto-paginated search (RFC 2696). Issues successive pages of at most
   # *page_size* entries, yielding each `Entry` as it arrives; memory is bounded to
-  # one page. On a server-side size/time/admin limit it raises `SearchLimitError`
-  # (with empty `entries` — matched entries were already yielded); any other failure
-  # raises `OperationError`. Because entries stream as they arrive, a page's entries
+  # one page. Raises `ReferralError` (with the referral URLs) when a page is a
+  # referral; `SearchLimitError` (with empty `entries` — matched entries were
+  # already yielded) on a server-side size/time/admin limit; `OperationError` on
+  # any other failure. Because entries stream as they arrive, a page's entries
   # are yielded *before* its result code is inspected — so an `OperationError` on a
   # later page may follow entries the caller has already received. Composes with *sort*.
   def search(
@@ -190,11 +218,21 @@ class LDAP::Client
       responses = @mutex.synchronize { @results.delete(result.id) } || [] of Response
       raise Error.new("unexpected response: #{result.tag}") unless result.tag.search_result?
 
-      # parse + yield outside the mutex; a cap breach surfaces typed like elsewhere
-      wrap_too_large { responses.each { |resp| yield resp.parse_entry } }
+      # parse + yield entries (tag 4) outside the mutex; a cap breach surfaces typed
+      # like elsewhere. Continuation references (tag 19) are handled below, not here.
+      wrap_too_large { responses.select(&.tag.search_returned_data?).each { |resp| yield resp.parse_entry } }
 
       details = result.parse_result
       code = details[:result_code]
+      # A referral means part of the result set lives elsewhere — surface it (the
+      # entries so far were already yielded); takes precedence over the limit codes.
+      if code.referral? || responses.any?(&.tag.search_result_referral?)
+        referrals = wrap_too_large do
+          (result.referral || [] of String) +
+            responses.select(&.tag.search_result_referral?).flat_map(&.referral_uris)
+        end
+        raise ReferralError.new(code, details[:matched_dn], details[:error_message], referrals, [] of Entry)
+      end
       if code.size_limit_exceeded? || code.time_limit_exceeded? || code.admin_limit_exceeded?
         raise SearchLimitError.new(code, details[:matched_dn], details[:error_message], [] of Entry)
       end
@@ -239,6 +277,8 @@ class LDAP::Client
     case result_code
     when .compare_true?  then true
     when .compare_false? then false
+    when .referral?
+      raise ReferralError.new(result_code, details[:matched_dn], details[:error_message], result.referral || [] of String)
     else
       raise OperationError.new("compare", result_code, details[:matched_dn], details[:error_message])
     end
@@ -264,8 +304,12 @@ class LDAP::Client
     result = send(request)
     raise Error.new("unexpected response: #{result.tag}") unless result.tag == expected
     details = result.parse_result
-    unless details[:result_code].success?
-      raise OperationError.new(operation, details[:result_code], details[:matched_dn], details[:error_message])
+    code = details[:result_code]
+    if code.referral?
+      raise ReferralError.new(code, details[:matched_dn], details[:error_message], result.referral || [] of String)
+    end
+    unless code.success?
+      raise OperationError.new(operation, code, details[:matched_dn], details[:error_message])
     end
     result
   end
@@ -274,14 +318,14 @@ class LDAP::Client
     response = Response.from_response packet
     # Search results are returned in multiple packets
     case response.tag
-    when Tag::SearchResultReferral
-      # TODO::
-    when Tag::SearchReturnedData
-      # Guarded by the same mutex as @requests: the read fiber appends here
-      # while a caller fiber deletes in #search — without this they race the
-      # Hash under multi-threading (-Dpreview_mt). Only accumulate while the
-      # request is still pending, so a slow server can't re-grow @results after
-      # a timed-out search cleaned it up.
+    when Tag::SearchReturnedData, Tag::SearchResultReferral
+      # Search entries (tag 4) and continuation references (tag 19) both stream in
+      # multiple packets sharing the request's messageID; accumulate them.
+      # Guarded by the same mutex as @requests: the read fiber appends here while a
+      # caller fiber deletes in #search — without this they race the Hash under
+      # multi-threading (-Dpreview_mt). Only accumulate while the request is still
+      # pending, so a slow server can't re-grow @results after a timed-out search
+      # cleaned it up.
       @mutex.synchronize do
         @results[response.id] << response if @requests.has_key?(response.id)
       end
