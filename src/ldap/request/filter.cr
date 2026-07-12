@@ -6,11 +6,10 @@ class LDAP::Request::Filter
     Equal
     GreaterThanOrEqual
     LessThanOrEqual
+    Approx
     And
     Or
     Not
-
-    # TODO:: Implement this
     Extensible
   end
 
@@ -95,6 +94,38 @@ class LDAP::Request::Filter
     left = BER.new.set_string(object, UniversalTags::OctetString)
     right = BER.new.set_string(value.to_s, UniversalTags::OctetString)
     self.new(Type::LessThanOrEqual, LDAP.context_sequence({left, right}, 6))
+  end
+
+  # approxMatch [8] — like an equality assertion, but the server applies its
+  # approximate-matching rule for the attribute (RFC 4511 §4.5.1.7.6).
+  def self.approx(object : String, value, escaped : Bool = false)
+    left = BER.new.set_string(object, UniversalTags::OctetString)
+    right = BER.new.set_string(unescape(value.to_s, escaped), UniversalTags::OctetString)
+    self.new(Type::Approx, LDAP.context_sequence({left, right}, 8))
+  end
+
+  # extensibleMatch [9] MatchingRuleAssertion (RFC 4511 §4.5.1.7.7):
+  #   { matchingRule [1] OPT, type [2] OPT, matchValue [3], dnAttributes [4] BOOLEAN DEFAULT FALSE }
+  # At least one of *attribute* (type) or *rule* (matchingRule) must be present.
+  # *value* is a literal assertion value (the parser unescapes before calling).
+  def self.extensible(value, *, attribute : String? = nil, rule : String? = nil, dn_attributes : Bool = false)
+    if attribute.nil? && rule.nil?
+      raise ArgumentError.new("extensibleMatch requires an attribute or a matching rule")
+    end
+
+    fields = [] of BER
+    fields << BER.new.set_string(rule, 1, TagClass::ContextSpecific) if rule
+    fields << BER.new.set_string(attribute, 2, TagClass::ContextSpecific) if attribute
+    fields << BER.new.set_string(value.to_s, 3, TagClass::ContextSpecific)
+    if dn_attributes
+      # No 3-arg set_boolean; build the universal boolean then retag as [4] primitive.
+      dn = BER.new.set_boolean(true)
+      dn.tag_class = TagClass::ContextSpecific
+      dn.tag_number = 4
+      fields << dn
+    end
+
+    self.new(Type::Extensible, LDAP.context_sequence(fields, 9))
   end
 
   def self.not_equal(object : String, value, escaped : Bool = false)
