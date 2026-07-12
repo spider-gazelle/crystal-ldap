@@ -78,6 +78,28 @@ class LDAP::Request
     })
   end
 
+  # RFC 2696 Simple Paged Results control. *cookie* is the opaque cookie from the
+  # previous page (empty on the first request); *size* is the requested page size.
+  def encode_paged_control(size : Int, cookie : Bytes) : BER
+    # controlValue ::= SEQUENCE { size INTEGER, cookie OCTET STRING }
+    cookie_ber = BER.new.set_string("", UniversalTags::OctetString)
+    cookie_ber.payload = cookie # binary-safe: raw bytes, no String round-trip
+    value = LDAP.sequence({
+      BER.new.set_integer(size),
+      cookie_ber,
+    })
+
+    # controlValue must be wrapped as an OCTET STRING (RFC 4511 §4.1.11)
+    control_value = BER.new.set_string("", UniversalTags::OctetString)
+    control_value.payload = value.to_slice
+
+    LDAP.sequence({
+      BER.new.set_string(PAGED_RESULTS, UniversalTags::OctetString),
+      BER.new.set_boolean(false),
+      control_value,
+    })
+  end
+
   # base:   https://tools.ietf.org/html/rfc4511#section-4.5.1.1
   # filter: https://tools.ietf.org/html/rfc4511#section-4.5.1.7
   # scope:  https://tools.ietf.org/html/rfc4511#section-4.5.1.2
@@ -96,6 +118,8 @@ class LDAP::Request
     size : Int = 0,
     time : Int = 0,
     sort : String | SortControl | BER | Nil = nil,
+    page_size : Int? = nil,
+    cookie : Bytes = Bytes.empty,
   )
     attributes = attributes.map { |attr| BER.new.set_string(attr.to_s, UniversalTags::OctetString) }
 
@@ -114,18 +138,17 @@ class LDAP::Request
       LDAP.sequence(attributes),
     }, Tag::SearchRequest)
 
-    # Sort controls
+    # Controls (RFC 4511 §4.1.1): controls [0] SEQUENCE OF Control
+    controls = [] of BER
     if sort
-      sort_control = case sort
-                     when String | SortControl
-                       encode_sort_controls(sort)
-                     when BER
-                       sort
-                     end
+      controls << (sort.is_a?(BER) ? sort : encode_sort_controls(sort))
+    end
+    controls << encode_paged_control(page_size, cookie) if page_size
 
-      build(search_request, sort_control)
-    else
+    if controls.empty?
       build(search_request)
+    else
+      build(search_request, LDAP.context_sequence(controls, 0))
     end
   end
 

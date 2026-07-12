@@ -159,6 +159,52 @@ class LDAP::Client
     raise OperationError.new("search", code, details[:matched_dn], details[:error_message])
   end
 
+  # Streaming, auto-paginated search (RFC 2696). Issues successive pages of at most
+  # *page_size* entries, yielding each `Entry` as it arrives; memory is bounded to
+  # one page. On a server-side size/time/admin limit it raises `SearchLimitError`
+  # (with empty `entries` — matched entries were already yielded); any other failure
+  # raises `OperationError`. Because entries stream as they arrive, a page's entries
+  # are yielded *before* its result code is inspected — so an `OperationError` on a
+  # later page may follow entries the caller has already received. Composes with *sort*.
+  def search(
+    base : String,
+    filter : Request::Filter | String = Request::Filter.equal("objectClass", "*"),
+    scope : SearchScope = SearchScope::WholeSubtree,
+    attributes : Enumerable(String) | Enumerable(Symbol) = [] of String,
+    attributes_only : Bool = false,
+    dereference : DereferenceAliases = DereferenceAliases::Always,
+    size : Int = 0,
+    time : Int = 0,
+    sort : String | Request::SortControl | BER | Nil = nil,
+    page_size : Int = 1000,
+    & : Entry -> _
+  ) : Nil
+    cookie = Bytes.empty
+    loop do
+      result = send(@request.search(
+        base: base, filter: filter, scope: scope, attributes: attributes,
+        attributes_only: attributes_only, dereference: dereference,
+        size: size, time: time, sort: sort,
+        page_size: page_size, cookie: cookie,
+      ))
+      responses = @mutex.synchronize { @results.delete(result.id) } || [] of Response
+      raise Error.new("unexpected response: #{result.tag}") unless result.tag.search_result?
+
+      # parse + yield outside the mutex; a cap breach surfaces typed like elsewhere
+      wrap_too_large { responses.each { |resp| yield resp.parse_entry } }
+
+      details = result.parse_result
+      code = details[:result_code]
+      if code.size_limit_exceeded? || code.time_limit_exceeded? || code.admin_limit_exceeded?
+        raise SearchLimitError.new(code, details[:matched_dn], details[:error_message], [] of Entry)
+      end
+      raise OperationError.new("search", code, details[:matched_dn], details[:error_message]) unless code.success?
+
+      cookie = result.paged_cookie
+      break if cookie.nil? || cookie.empty?
+    end
+  end
+
   # https://tools.ietf.org/html/rfc4511#section-4.6
   def modify(dn : String, changes : Enumerable(Modification)) : self
     expect_result(@request.modify(dn, changes), Tag::ModifyResponse, "modify")

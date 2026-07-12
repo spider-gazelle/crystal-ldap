@@ -17,6 +17,22 @@ private def result_op(code : Int32, tag = LDAP::Tag::SearchResult) : LDAP::BER
   }, tag)
 end
 
+# Wraps a SearchResultDone with a paged-results control carrying *cookie*.
+private def done_with_cookie(cookie : Bytes) : LDAP::Response
+  op = LDAP.app_sequence({
+    LDAP::BER.new.set_integer(0, LDAP::UniversalTags::Enumerated),
+    LDAP::BER.new.set_string("", LDAP::UniversalTags::OctetString),
+    LDAP::BER.new.set_string("", LDAP::UniversalTags::OctetString),
+  }, LDAP::Tag::SearchResult)
+  control = LDAP::Request.new.encode_paged_control(0, cookie)
+  packet = LDAP.sequence({
+    LDAP::BER.new.set_integer(1),
+    op,
+    LDAP.context_sequence([control], 0),
+  })
+  LDAP::Response.from_response(IO::Memory.new(packet.to_slice).read_bytes(ASN1::BER))
+end
+
 describe LDAP::Response do
   describe ".from_response" do
     # A server can send a protocol-op tag we don't model; decoding it must not
@@ -54,6 +70,27 @@ describe LDAP::Response do
     it "renders an unknown code without raising" do
       response = LDAP::Response.new(LDAP::BER.new.set_integer(1), result_op(0))
       response.result_message(123).should eq("123")
+    end
+  end
+
+  describe "#paged_cookie" do
+    it "returns the cookie from the paged-results control" do
+      done_with_cookie(Bytes[0xAB, 0xCD]).paged_cookie.should eq(Bytes[0xAB, 0xCD])
+    end
+
+    it "returns empty bytes for an empty cookie (last page)" do
+      done_with_cookie(Bytes.empty).paged_cookie.should eq(Bytes.empty)
+    end
+
+    it "returns nil when the response has no controls" do
+      op = LDAP.app_sequence({
+        LDAP::BER.new.set_integer(0, LDAP::UniversalTags::Enumerated),
+        LDAP::BER.new.set_string("", LDAP::UniversalTags::OctetString),
+        LDAP::BER.new.set_string("", LDAP::UniversalTags::OctetString),
+      }, LDAP::Tag::SearchResult)
+      packet = LDAP.sequence({LDAP::BER.new.set_integer(1), op})
+      resp = LDAP::Response.from_response(IO::Memory.new(packet.to_slice).read_bytes(ASN1::BER))
+      resp.paged_cookie.should be_nil
     end
   end
 end
