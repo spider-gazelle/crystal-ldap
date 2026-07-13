@@ -98,7 +98,9 @@ class LDAP::Client
     @socket.close unless @socket.closed?
   end
 
-  def write(message_id : Int32, sequence : BER)
+  # Writes a raw LDAPMessage and registers its response promise. Internal: all
+  # operations go through #send; the BER type is not part of the public surface.
+  private def write(message_id : Int32, sequence : BER)
     @mutex.synchronize do
       raise LDAP::Error.new("connection closed") if @socket.closed?
 

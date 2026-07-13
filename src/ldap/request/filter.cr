@@ -143,19 +143,25 @@ class LDAP::Request::Filter
     self.new(Type::Not, LDAP.context_sequence({filter}, 2))
   end
 
-  def self.join(left : BER, right : BER)
+  # Logical AND [0] of two filters (see also `#&`).
+  # Renamed from the misleading `join` before 1.0.
+  def self.conjoin(left : BER, right : BER)
     self.new(Type::And, LDAP.context_sequence({left, right}, 0))
   end
 
-  def self.join(left : Filter, right : Filter)
+  # :ditto:
+  def self.conjoin(left : Filter, right : Filter)
     self.new(Type::And, LDAP.context_sequence({left.to_ber, right.to_ber}, 0))
   end
 
-  def self.intersect(left : BER, right : BER)
+  # Logical OR [1] of two filters (see also `#|`).
+  # Renamed from the misleading `intersect` before 1.0.
+  def self.disjoin(left : BER, right : BER)
     self.new(Type::Or, LDAP.context_sequence({left, right}, 1))
   end
 
-  def self.intersect(left : Filter, right : Filter)
+  # :ditto:
+  def self.disjoin(left : Filter, right : Filter)
     self.new(Type::Or, LDAP.context_sequence({left.to_ber, right.to_ber}, 1))
   end
 
@@ -177,12 +183,12 @@ class LDAP::Request::Filter
 
   # Joins two or more filters so that all conditions must be true.
   def &(other)
-    self.class.join(self, other)
+    self.class.conjoin(self, other)
   end
 
   # Selects entries where either the left or right side are true.
   def |(other)
-    self.class.intersect(self, other)
+    self.class.disjoin(self, other)
   end
 
   # Negates a filter.
