@@ -93,4 +93,41 @@ describe LDAP::Response do
       resp.paged_cookie.should be_nil
     end
   end
+
+  describe "#referral" do
+    it "reads the referral [3] URIs of a referral result" do
+      op = LDAP.app_sequence({
+        LDAP::BER.new.set_integer(10, LDAP::UniversalTags::Enumerated),
+        LDAP::BER.new.set_string("", LDAP::UniversalTags::OctetString),
+        LDAP::BER.new.set_string("", LDAP::UniversalTags::OctetString),
+        LDAP.context_sequence({LDAP::BER.new.set_string("ldap://b/dc=x", LDAP::UniversalTags::OctetString)}, 3),
+      }, LDAP::Tag::SearchResult)
+      packet = LDAP.sequence({LDAP::BER.new.set_integer(1), op})
+      resp = LDAP::Response.from_response(IO::Memory.new(packet.to_slice).read_bytes(ASN1::BER))
+      resp.referral.should eq(["ldap://b/dc=x"])
+    end
+
+    it "returns nil when the result has no referral field" do
+      op = LDAP.app_sequence({
+        LDAP::BER.new.set_integer(0, LDAP::UniversalTags::Enumerated),
+        LDAP::BER.new.set_string("", LDAP::UniversalTags::OctetString),
+        LDAP::BER.new.set_string("", LDAP::UniversalTags::OctetString),
+      }, LDAP::Tag::SearchResult)
+      packet = LDAP.sequence({LDAP::BER.new.set_integer(1), op})
+      resp = LDAP::Response.from_response(IO::Memory.new(packet.to_slice).read_bytes(ASN1::BER))
+      resp.referral.should be_nil
+    end
+  end
+
+  describe "#referral_uris" do
+    it "reads the URIs of a SearchResultReference (tag 19)" do
+      op = LDAP.app_sequence({
+        LDAP::BER.new.set_string("ldap://b/dc=x", LDAP::UniversalTags::OctetString),
+        LDAP::BER.new.set_string("ldap://c/dc=y", LDAP::UniversalTags::OctetString),
+      }, LDAP::Tag::SearchResultReferral)
+      packet = LDAP.sequence({LDAP::BER.new.set_integer(1), op})
+      resp = LDAP::Response.from_response(IO::Memory.new(packet.to_slice).read_bytes(ASN1::BER))
+      resp.referral_uris.should eq(["ldap://b/dc=x", "ldap://c/dc=y"])
+    end
+  end
 end
