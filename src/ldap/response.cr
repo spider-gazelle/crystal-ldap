@@ -97,6 +97,22 @@ class LDAP::Response
     }
   end
 
+  # The RFC 2696 paged-results cookie carried on a SearchResultDone, or nil if the
+  # response has no such control. An empty cookie signals the final page.
+  def paged_cookie : Bytes?
+    controls = @control
+    return nil if controls.nil?
+    controls.children.each do |control|
+      fields = control.children
+      next if fields.empty?
+      next unless fields[0].get_string == Request::PAGED_RESULTS
+      # controlValue (last field): OCTET STRING wrapping SEQUENCE { size, cookie }
+      inner = IO::Memory.new(fields[-1].get_string.to_slice).read_bytes(ASN1::BER)
+      return inner.children[1].get_string.to_slice
+    end
+    nil
+  end
+
   def parse_entry : LDAP::Entry
     entry = @payload
     raise Error.new("Invalid entry size in search results") unless entry.size >= 2
