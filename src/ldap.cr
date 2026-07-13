@@ -10,7 +10,9 @@ module LDAP
 
   class Error < RuntimeError; end
 
-  VERSION = 3
+  # The LDAP protocol version spoken by this client (RFC 4511 — LDAPv3),
+  # sent in every BindRequest.
+  PROTOCOL_VERSION = 3
 
   enum Tag
     # http://tools.ietf.org/html/rfc4511#section-4.2

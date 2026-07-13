@@ -73,15 +73,15 @@ class LDAP::Response
     end
   end
 
-  # A Bind Response may have an additional field, ID [7], serverSaslCreds,
-  # per RFC 2251 pgh 4.2.3.
+  # A BindResponse is an LDAPResult plus two OPTIONAL trailing fields —
+  # referral [3] and serverSaslCreds [7] (RFC 4511 §4.2.2) — so the 4th element
+  # is not always the credentials: dispatch by context tag, never by position.
   def parse_bind_response
     sequence = @payload
     raise LDAP::Error.new("Invalid LDAP Bind Response size") unless sequence.size >= 3
 
-    result = parse_result
-    result = result.merge({server_sasl_creds: sequence[3]}) if sequence.size >= 4
-    result
+    creds = sequence[3..]?.try &.find { |field| field.tag_number.to_i == 7 }
+    parse_result.merge({server_sasl_creds: creds})
   end
 
   def parse_result

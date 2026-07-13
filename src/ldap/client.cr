@@ -89,7 +89,13 @@ class LDAP::Client
   end
 
   def close
-    @socket.close unless closed?
+    # Serialized with #write: closing mid-write would race the socket. Internal
+    # callers already holding @mutex use close_locked (the mutex is non-reentrant).
+    @mutex.synchronize { close_locked }
+  end
+
+  private def close_locked
+    @socket.close unless @socket.closed?
   end
 
   def write(message_id : Int32, sequence : BER)
@@ -366,7 +372,7 @@ class LDAP::Client
       parse_response data
     end
   rescue IO::Error
-    @mutex.synchronize { close }
+    close
   rescue e
     # A ContentTooLarge raised while decoding nested children surfaces here as an
     # LDAP-typed error (the read_message rescue only covers the top-level frame).
@@ -379,7 +385,7 @@ class LDAP::Client
     @mutex.synchronize do
       @requests.values.each(&.reject(error))
       @requests.clear
-      close
+      close_locked
     end
   ensure
     @mutex.synchronize do
