@@ -35,7 +35,7 @@ class LDAP::Request
 
   def authenticate(username : String = "", password : String = "")
     build(LDAP.app_sequence({
-      BER.new.set_integer(3),
+      BER.new.set_integer(LDAP::PROTOCOL_VERSION),
       BER.new.set_string(username, UniversalTags::OctetString),
       BER.new.set_string(password, 0, TagClass::ContextSpecific),
     }, Tag::BindRequest))

@@ -10,13 +10,17 @@ describe LDAP::Request::FilterParser do
 
   it "should parse a variety of filters" do
     # test multibyte characters
-    LDAP::Request::FilterParser.parse("(cn=名前)")
+    LDAP::Request::FilterParser.parse("(cn=名前)").to_slice
+      .should eq(LDAP::Request::Filter.equal("cn", "名前").to_slice)
     # test brackets
-    LDAP::Request::FilterParser.parse("(cn=[{something}])")
+    LDAP::Request::FilterParser.parse("(cn=[{something}])").to_slice
+      .should eq(LDAP::Request::Filter.equal("cn", "[{something}]").to_slice)
     # test slashes
-    LDAP::Request::FilterParser.parse("(departmentNumber=FOO//BAR/FOO)")
+    LDAP::Request::FilterParser.parse("(departmentNumber=FOO//BAR/FOO)").to_slice
+      .should eq(LDAP::Request::Filter.equal("departmentNumber", "FOO//BAR/FOO").to_slice)
     # test colons
-    LDAP::Request::FilterParser.parse("(ismemberof=cn=edu:berkeley:app:calmessages:deans,ou=campus groups,dc=berkeley,dc=edu)")
+    LDAP::Request::FilterParser.parse("(ismemberof=cn=edu:berkeley:app:calmessages:deans,ou=campus groups,dc=berkeley,dc=edu)").to_slice
+      .should eq(LDAP::Request::Filter.equal("ismemberof", "cn=edu:berkeley:app:calmessages:deans,ou=campus groups,dc=berkeley,dc=edu").to_slice)
   end
 
   it "parses an approx (~=) filter" do

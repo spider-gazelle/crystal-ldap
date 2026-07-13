@@ -42,6 +42,14 @@ describe LDAP do
     packet.to_slice.should eq(bind_request)
   end
 
+  it "encodes the LDAP protocol version from PROTOCOL_VERSION" do
+    LDAP::PROTOCOL_VERSION.should eq(3)
+
+    _, packet = LDAP::Request.new.authenticate(user, pass)
+    bind_op = IO::Memory.new(packet.to_slice).read_bytes(ASN1::BER).children[1]
+    bind_op.children[0].get_integer.should eq(LDAP::PROTOCOL_VERSION)
+  end
+
   it "should parse a bind success response" do
     io = IO::Memory.new(bind_success)
     ber = io.read_bytes(ASN1::BER)
@@ -51,9 +59,40 @@ describe LDAP do
     response.tag.should eq(LDAP::Tag::BindResult)
 
     response.parse_bind_response.should eq({
-      result_code:   LDAP::Response::Code::Success,
-      matched_dn:    "",
-      error_message: "",
+      result_code:       LDAP::Response::Code::Success,
+      matched_dn:        "",
+      error_message:     "",
+      server_sasl_creds: nil,
     })
+  end
+
+  # BindResponse ::= LDAPResult + referral [3] OPTIONAL + serverSaslCreds [7]
+  # OPTIONAL — the 4th element is NOT always the credentials; dispatch by tag.
+  it "reads serverSaslCreds from its [7] tag, not by position" do
+    op = LDAP.app_sequence({
+      LDAP::BER.new.set_integer(14, LDAP::UniversalTags::Enumerated), # saslBindInProgress
+      LDAP::BER.new.set_string("", LDAP::UniversalTags::OctetString),
+      LDAP::BER.new.set_string("", LDAP::UniversalTags::OctetString),
+      LDAP::BER.new.set_string("creds", 7, LDAP::TagClass::ContextSpecific),
+    }, LDAP::Tag::BindResult)
+    packet = LDAP.sequence({LDAP::BER.new.set_integer(1), op})
+    response = LDAP::Response.from_response(IO::Memory.new(packet.to_slice).read_bytes(ASN1::BER))
+
+    creds = response.parse_bind_response[:server_sasl_creds]
+    creds.should_not be_nil
+    String.new(creds.get_bytes).should eq("creds") if creds
+  end
+
+  it "does not mistake a bind referral [3] for serverSaslCreds" do
+    op = LDAP.app_sequence({
+      LDAP::BER.new.set_integer(10, LDAP::UniversalTags::Enumerated), # referral
+      LDAP::BER.new.set_string("", LDAP::UniversalTags::OctetString),
+      LDAP::BER.new.set_string("", LDAP::UniversalTags::OctetString),
+      LDAP.context_sequence({LDAP::BER.new.set_string("ldap://b/", LDAP::UniversalTags::OctetString)}, 3),
+    }, LDAP::Tag::BindResult)
+    packet = LDAP.sequence({LDAP::BER.new.set_integer(1), op})
+    response = LDAP::Response.from_response(IO::Memory.new(packet.to_slice).read_bytes(ASN1::BER))
+
+    response.parse_bind_response[:server_sasl_creds].should be_nil
   end
 end
