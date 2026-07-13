@@ -25,9 +25,11 @@ class LDAP::Request::FilterParser
   # This parses a given expression inside of parentheses.
   def parse_filter_branch(scanner)
     scanner.scan(/\s*/)
+    # The trailing [\w] makes this stop on a word char, i.e. just before `:=`,
+    # so an extensible LHS (which may contain ':') is captured whole and split later.
     if token = scanner.scan(/[-\w:.]*[\w]/)
       scanner.scan(/\s*/)
-      if op = scanner.scan(/<=|>=|!=|:=|=/)
+      if op = scanner.scan(/<=|>=|!=|~=|:=|=/)
         scanner.scan(/\s*/)
         if value = scanner.scan(/(?:[-\[\]{}\w*.+\/:@=,#\$%&!'^~\s\xC3\x80-\xCA\xAF]|[^\x00-\x7F]|\\[a-fA-F\d]{2})+/)
           # 20100313 AZ: Assumes that "(uid=george*)" is the same as
@@ -43,8 +45,10 @@ class LDAP::Request::FilterParser
             Filter.less_than(token, value)
           when ">="
             Filter.greater_than(token, value)
-            # when ":="
-            #  Filter.ex(token, value)
+          when "~="
+            Filter.approx(token, value, escaped: true)
+          when ":="
+            Filter.extensible(Filter.unescape(value, true), **parse_extensible_lhs(token))
           else
             raise FilterSyntaxInvalidError.new("unsupported operation #{op}")
           end
@@ -113,5 +117,30 @@ class LDAP::Request::FilterParser
       branches << branch
     end
     branches
+  end
+
+  # RFC 4515 extensible LHS: attr[":dn"][":" rule]  or  ":" [dn ":"] rule.
+  # The `token` regex includes ':' so it already absorbed the whole LHS; split it.
+  # A colon-separated "dn" is the reserved dnAttributes flag, never a matching rule.
+  private def parse_extensible_lhs(token : String)
+    parts = token.split(':')
+    attribute = parts.shift
+    attribute = nil if attribute.empty?
+    dn_attributes = false
+    rule = nil
+    parts.each do |part|
+      if part.compare("dn", case_insensitive: true) == 0
+        # RFC 4515 ABNF string literals are case-insensitive; "dn" is the reserved
+        # dnAttributes flag, never a matching rule.
+        dn_attributes = true
+      elsif rule.nil?
+        rule = part
+      else
+        # More than one matching-rule segment is malformed — reject rather than
+        # silently drop one and build a filter that differs from the input.
+        raise FilterSyntaxInvalidError.new("invalid extensible match LHS: #{token.inspect}")
+      end
+    end
+    {attribute: attribute, rule: rule, dn_attributes: dn_attributes}
   end
 end
