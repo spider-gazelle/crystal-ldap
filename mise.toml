@@ -38,6 +38,18 @@ run = "crystal docs"
 description = "Format-check, lint and test in one shot"
 run = "mise dev:format-check && mise dev:ameba && mise dev:spec && mise dev:spec-mt"
 
+[tasks."dev:ldap-up"]
+description = "Start the integration OpenLDAP server (docker compose)"
+run = "docker compose up -d --wait"
+
+[tasks."dev:ldap-down"]
+description = "Stop and wipe the integration OpenLDAP server"
+run = "docker compose down -v"
+
+[tasks."dev:spec-integration"]
+description = "Run the integration suite against the live LDAP server (needs dev:ldap-up)"
+run = "crystal spec --error-trace -Dintegration {{vars.SPEC_OPTS}}"
+
 # TODO: remove me when https://github.com/crystal-lang/crystal/issues/16746 is fixed
 [tasks."dev:fix-shards-command"]
 description = "Fix missing shards command on macOS"

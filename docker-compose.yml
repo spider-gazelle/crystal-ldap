@@ -1,0 +1,30 @@
+services:
+  openldap:
+    image: osixia/openldap:1.5.0
+    # --copy-service is required so the mounted custom bootstrap LDIF is applied.
+    command: ["--copy-service"]
+    environment:
+      LDAP_ORGANISATION: "Example Inc."
+      LDAP_DOMAIN: "example.org"
+      LDAP_ADMIN_PASSWORD: "adminpassword"
+    ports:
+      - "1389:389"
+    volumes:
+      - ./spec/integration/ldif:/container/service/slapd/assets/config/bootstrap/ldif/custom
+    healthcheck:
+      test:
+        - "CMD"
+        - "ldapsearch"
+        - "-x"
+        - "-H"
+        - "ldap://localhost:389"
+        - "-b"
+        - "dc=example,dc=org"
+        - "-D"
+        - "cn=admin,dc=example,dc=org"
+        - "-w"
+        - "adminpassword"
+      interval: 3s
+      timeout: 5s
+      retries: 20
+      start_period: 5s

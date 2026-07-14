@@ -158,3 +158,29 @@ jobs:
 
       - name: Run tests (multi-threaded)
         run: mise dev:spec-mt
+
+  # Opt-in suite driving a real OpenLDAP (docker compose), gated behind
+  # -Dintegration so the unit jobs above stay serverless.
+  test_integration:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Git checkout
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Setup mise
+        uses: jdx/mise-action@v4
+
+      - name: Install dependencies
+        run: mise dev:deps
+
+      - name: Start the LDAP server
+        run: mise dev:ldap-up
+
+      - name: Run the integration suite
+        run: mise dev:spec-integration
+
+      - name: Stop the LDAP server
+        if: always()
+        run: mise dev:ldap-down
