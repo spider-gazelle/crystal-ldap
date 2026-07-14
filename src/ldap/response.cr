@@ -55,7 +55,9 @@ class LDAP::Response
 
   getter id : Int32
   getter tag : ::LDAP::Tag
-  getter payload : Array(BER)
+  # The raw protocol-op children — bindata's BER stays off the public surface;
+  # consumers use the typed accessors (parse_result, parse_entry, referral, …).
+  private getter payload : Array(BER)
   getter control : BER?
 
   def self.from_response(packet : BER) : Response

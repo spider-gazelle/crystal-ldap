@@ -3,6 +3,28 @@ require "./spec_helper"
 private alias Filter = LDAP::Request::Filter
 
 describe LDAP::Request::Filter do
+  describe "boolean composition" do
+    it "conjoin / & encode an and [0] of both filters" do
+      left = Filter.equal("cn", "a")
+      right = Filter.equal("sn", "b")
+
+      ber = Filter.conjoin(left, right).to_ber
+      ber.to_slice[0].should eq(0xA0_u8) # and [0] context-constructed
+      ber.children.size.should eq(2)
+      (left & right).to_slice.should eq(ber.to_slice)
+    end
+
+    it "disjoin / | encode an or [1] of both filters" do
+      left = Filter.equal("cn", "a")
+      right = Filter.equal("sn", "b")
+
+      ber = Filter.disjoin(left, right).to_ber
+      ber.to_slice[0].should eq(0xA1_u8) # or [1] context-constructed
+      ber.children.size.should eq(2)
+      (left | right).to_slice.should eq(ber.to_slice)
+    end
+  end
+
   describe ".approx" do
     it "encodes an approxMatch [8] with attribute and value" do
       filter = Filter.approx("cn", "smith")
