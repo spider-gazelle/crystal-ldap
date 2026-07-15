@@ -1,0 +1,38 @@
+dn: ou=users,dc=example,dc=org
+objectClass: organizationalUnit
+ou: users
+
+dn: uid=user01,ou=users,dc=example,dc=org
+objectClass: inetOrgPerson
+cn: User 01
+sn: One
+uid: user01
+userPassword: pass01
+
+dn: uid=user02,ou=users,dc=example,dc=org
+objectClass: inetOrgPerson
+cn: User 02
+sn: Two
+uid: user02
+userPassword: pass02
+
+dn: uid=user03,ou=users,dc=example,dc=org
+objectClass: inetOrgPerson
+cn: User 03
+sn: Three
+uid: user03
+userPassword: pass03
+
+dn: uid=user04,ou=users,dc=example,dc=org
+objectClass: inetOrgPerson
+cn: User 04
+sn: Four
+uid: user04
+userPassword: pass04
+
+dn: uid=user05,ou=users,dc=example,dc=org
+objectClass: inetOrgPerson
+cn: User 05
+sn: Five
+uid: user05
+userPassword: pass05
