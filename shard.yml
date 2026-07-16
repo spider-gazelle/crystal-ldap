@@ -1,6 +1,6 @@
 name: ldap
-version: 0.9.1
-crystal: ">= 1.0.0"
+version: 1.0.0
+crystal: ">= 1.2.0"
 
 dependencies:
   bindata:
